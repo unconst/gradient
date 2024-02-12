@@ -97,7 +97,7 @@ class Validator:
             Tuple[bool, str]: A tuple containing a boolean indicating whether to blacklist the miner,
                               and a string message with the reason.
         """
-        if synapse.public_key not in self.metagraph.hotkeys:
+        if synapse.dendrite.hotkey not in self.metagraph.hotkeys:
             bt.logging.debug(f"Miner {synapse.public_key} not registered in metagraph, blacklisting.")
             return True, 'miner not registered in metagraph'
         return False, 'success'
@@ -114,9 +114,9 @@ class Validator:
         """
         try:
             # Check if the miner's public key is already in the history, if not, initialize it
-            if synapse.public_key not in self.history:
-                self.history[synapse.public_key] = {'total': 0, 'verified': 0, 'valid': 0}
-            miner_history = self.history[synapse.public_key]
+            if synapse.dendrite.hotkey not in self.history:
+                self.history[synapse.dendrite.hotkey] = {'total': 0, 'verified': 0, 'valid': 0}
+            miner_history = self.history[synapse.dendrite.hotkey]
             
             # Randomly decide whether to verify or not based on the verify_rate
             miner_history['total'] += 1
@@ -126,16 +126,16 @@ class Validator:
             
             # Check model hash.
             if synapse.model_hash != self.model_hash:
-                bt.logging.info(f"Model hash mismatch for miner {synapse.public_key}.")
+                bt.logging.info(f"Model hash mismatch for miner {synapse.dendrite.hotkey}.")
                 return synapse
             
             # Check hparams
             if synapse.batch_size != batch_size or synapse.sequence_length != sequence_length or synapse.topk_percent != topk_percent:
-                bt.logging.info(f"Hparams mismatch for miner {synapse.public_key}.")
+                bt.logging.info(f"Hparams mismatch for miner {synapse.dendrite.hotkey}.")
                 return synapse
             
             # Perform verification
-            bt.logging.debug(f"Verifying proof for miner {synapse.public_key}.")
+            bt.logging.debug(f"Verifying proof for miner {synapse.dendrite.hotkey}.")
             gradient = create_gradient(
                 self.model,
                 self.tokenizer,
@@ -147,11 +147,11 @@ class Validator:
             )
             gradient_hash = create_gradient_hash( gradient = gradient )
             if gradient_hash == synapse.hash:
-                bt.logging.info(f"Proof verified for miner {synapse.public_key}.")
+                bt.logging.info(f"Proof verified for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
                 miner_history['valid'] += 1
             else:
-                bt.logging.info(f"Proof failed for miner {synapse.public_key}.")
+                bt.logging.info(f"Proof failed for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
         except Exception as e:
             bt.logging.error(f"Error during verification: {str(e)}")
