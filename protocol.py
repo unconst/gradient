@@ -25,3 +25,4 @@ class Seal( bt.Synapse ):
     sequence_length: int
     batch_size: int
     topk_percent: float
+    vresult: str = None

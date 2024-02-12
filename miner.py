@@ -151,7 +151,9 @@ class Miner:
         
         # Send seal to validators
         validator_axons = [self.metagraph.axons[uid] for uid in self.metagraph.uids[self.metagraph.validator_permit]]
-        self.dendrite.query(validator_axons, seal)
+        responses = self.dendrite.query(validator_axons, seal, timeout = 1 )
+        for response in responses:
+            bt.logging.debug(f"Received response from validator: {response.vresult}")
 
 if __name__ == "__main__":
     miner = Miner()

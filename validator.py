@@ -122,16 +122,19 @@ class Validator:
             miner_history['total'] += 1
             if random.random() > verify_rate:
                 bt.logging.trace("Skipping verification due to rate.")
+                synapse.vresult = "skipped verification"
                 return synapse
             
             # Check model hash.
             if synapse.model_hash != self.model_hash:
                 bt.logging.info(f"Model hash mismatch for miner {synapse.dendrite.hotkey}.")
+                synapse.vresult = "invalid model"
                 return synapse
             
             # Check hparams
             if synapse.batch_size != batch_size or synapse.sequence_length != sequence_length or synapse.topk_percent != topk_percent:
                 bt.logging.info(f"Hparams mismatch for miner {synapse.dendrite.hotkey}.")
+                synapse.vresult = "invalid hparams"
                 return synapse
             
             # Perform verification
@@ -150,11 +153,16 @@ class Validator:
                 bt.logging.info(f"Proof verified for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
                 miner_history['valid'] += 1
+                synapse.vresult = "succeeded verification"
             else:
                 bt.logging.info(f"Proof failed for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
+                synapse.vresult = "failed verification"
+
         except Exception as e:
             bt.logging.error(f"Error during verification: {str(e)}")
+            synapse.vresult = "error during verification"
+
         finally:
             return synapse
             
