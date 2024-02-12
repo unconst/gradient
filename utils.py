@@ -1,9 +1,27 @@
-import hashlib
+# The MIT License (MIT)
+# Copyright © 2023 Yuma Rao
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the “Software”), to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+# the Software.
+
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
 import torch
 import typing
-import random
+import pickle
+import hashlib
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from data import SubsetFalconLoader
+from protocol import Seal
 
 def get_model_and_tokenizer():
     model_name = "gpt2"
@@ -96,11 +114,12 @@ def accumulate_proofs(model, proofs):
         param.grad = grad_flat.view_as(param.grad)
         
         
-def compute_proof_hash(proof, pages, batch_size, sequence_length, topk_percent):
+def create_seal(model, proof, pages, batch_size, sequence_length, topk_percent):
     """
-    Compute a hash of the proof and the parameters used to generate the gradient proof.
+    Compute a hash of the proof, the model, and the parameters used to generate the gradient proof.
     
     Args:
+    - model (torch.nn.Module): The model used to generate the proofs.
     - proofs (Dict[str, Tuple[torch.LongTensor, torch.FloatTensor]]): proof
     - pages (List[int]): The pages used to generate the proofs.
     - batch_size (int): The batch size used.
@@ -108,41 +127,27 @@ def compute_proof_hash(proof, pages, batch_size, sequence_length, topk_percent):
     - topk_percent (float): The topk percent used.
     
     Returns:
-    - str: The computed hash.
+    - Seal: The computed seal containing the hashes and parameters.
     """
-    # Convert all inputs to string and concatenate
-    concatenated_inputs = ''.join(proof) + \
+    # Serialize model's state dict and compute its hash
+    model_state_dict = model.state_dict()
+    model_state_bytes = pickle.dumps(model_state_dict)
+    model_hash = hashlib.sha256(model_state_bytes).hexdigest()
+    
+    # Convert all other inputs to string and concatenate
+    concatenated_inputs = ''.join([str(item) for item in proof.values()]) + \
                           ''.join([str(page) for page in pages]) + \
                           str(batch_size) + str(sequence_length) + str(topk_percent)
     # Encode the concatenated string
     encoded_inputs = concatenated_inputs.encode()
-    # Compute the hash
-    proof_hash = hashlib.sha256(encoded_inputs).hexdigest()
-    return proof_hash
-
-def create_seal( proof, pages, batch_size, sequence_length, topk_percent ):
-    """
-    Create a seal from the proofs and the parameters used to generate the proofs.
+    # Compute the hash for the gradient proof
+    gradient_hash = hashlib.sha256(encoded_inputs).hexdigest()
     
-    Args:
-    - proof ( Tuple[torch.LongTensor, torch.FloatTensor]]): A gradient proof.
-      where each proof is a dictionary mapping parameter names to tuples of indices and values.
-    - pages (List[int]): The pages used to generate the proofs.
-    - batch_size (int): The batch size used.
-    - sequence_length (int): The sequence length used.
-    - topk_percent (float): The topk percent used.
-    
-    Returns:
-    - Dict[str, Union[str, List[int], int, float]]: The seal.
-    """
-    # Compute the hash
-    hash = compute_proof_hash(proof, pages, batch_size, sequence_length, topk_percent)
-    # Create the seal
-    seal = {
-        'hash': hash,
-        'pages': pages,
-        'batch_size': batch_size,
-        'sequence_length': sequence_length,
-        'topk_percent': topk_percent
-    }
-    return seal
+    return Seal(
+        pages = pages,
+        model_hash = model_hash,
+        gradient_hash = gradient_hash,
+        batch_size = batch_size,
+        sequence_length = sequence_length,
+        topk_percent = topk_percent
+    )
