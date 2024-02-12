@@ -112,6 +112,7 @@ class Validator:
         Returns:
             Verify: The original verification request, potentially modified based on verification result.
         """
+        bt.logging.debug(f"Received verification request from miner {synapse.dendrite.hotkey}.")
         try:
             # Check if the miner's public key is already in the history, if not, initialize it
             if synapse.dendrite.hotkey not in self.history:
@@ -121,19 +122,19 @@ class Validator:
             # Randomly decide whether to verify or not based on the verify_rate
             miner_history['total'] += 1
             if random.random() > verify_rate:
-                bt.logging.trace("Skipping verification due to rate.")
+                bt.logging.debug("Skipping verification due to rate.")
                 synapse.vresult = "skipped verification"
                 return synapse
             
             # Check model hash.
             if synapse.model_hash != self.model_hash:
-                bt.logging.info(f"Model hash mismatch for miner {synapse.dendrite.hotkey}.")
+                bt.logging.debug(f"Model hash mismatch for miner {synapse.dendrite.hotkey}.")
                 synapse.vresult = "invalid model"
                 return synapse
             
             # Check hparams
             if synapse.batch_size != batch_size or synapse.sequence_length != sequence_length or synapse.topk_percent != topk_percent:
-                bt.logging.info(f"Hparams mismatch for miner {synapse.dendrite.hotkey}.")
+                bt.logging.debug(f"Hparams mismatch for miner {synapse.dendrite.hotkey}.")
                 synapse.vresult = "invalid hparams"
                 return synapse
             
@@ -150,17 +151,17 @@ class Validator:
             )
             gradient_hash = create_gradient_hash( gradient = gradient )
             if gradient_hash == synapse.hash:
-                bt.logging.info(f"Proof verified for miner {synapse.dendrite.hotkey}.")
+                bt.logging.debug(f"Proof verified for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
                 miner_history['valid'] += 1
                 synapse.vresult = "succeeded verification"
             else:
-                bt.logging.info(f"Proof failed for miner {synapse.dendrite.hotkey}.")
+                bt.logging.debug(f"Proof failed for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
                 synapse.vresult = "failed verification"
 
         except Exception as e:
-            bt.logging.error(f"Error during verification: {str(e)}")
+            bt.logging.debug(f"Error during verification: {str(e)}")
             synapse.vresult = "error during verification"
 
         finally:
