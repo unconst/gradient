@@ -171,7 +171,7 @@ class Validator:
                 topk_percent = topk_percent
             )
             gradient_hash = create_gradient_hash( gradient = gradient )
-            if gradient_hash == synapse.hash:
+            if gradient_hash == synapse.gradient_hash:
                 bt.logging.debug(f"Proof verified for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
                 miner_history['valid'] += 1
