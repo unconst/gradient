@@ -20,6 +20,7 @@ import typing
 import random
 import asyncio
 import argparse
+import multiprocessing
 import bittensor as bt
 from protocol import Seal
 from hparams import pages_per_proof, topk_percent, sequence_length, batch_size
@@ -86,6 +87,26 @@ class Validator:
         self.axon.attach(forward_fn=self.verify, blacklist_fn=self.blacklist)
         bt.logging.info("Validator initialized.")
         
+    def try_sync_metagraph(self, ttl: int):
+        """
+        Attempts to synchronize the metagraph within a given time-to-live (TTL) period.
+        Args:
+            ttl (int): The time-to-live (TTL) in seconds for the synchronization attempt.
+        """
+        def sync_metagraph(endpoint):
+            metagraph = bt.subtensor(endpoint).metagraph(self.config.netuid)
+            metagraph.save()
+        process = multiprocessing.Process(target=sync_metagraph, args=(self.subtensor.chain_endpoint,))
+        process.start()
+        process.join(timeout=ttl)
+        if process.is_alive():
+            process.terminate()
+            process.join()
+            bt.logging.error(f"Failed to sync metagraph after {ttl} seconds")
+            return
+        # Load new state.
+        self.metagraph.load()
+        
     async def blacklist(self, synapse: Seal) -> typing.Tuple[bool, str]:
         """
         Checks if a miner is registered in the metagraph and should be blacklisted.
@@ -127,7 +148,7 @@ class Validator:
                 return synapse
             
             # Check model hash.
-            if synapse.model_hash != self.model_hash:
+            if not synapse.model_hash == self.model_hash:
                 bt.logging.debug(f"Model hash mismatch for miner {synapse.dendrite.hotkey}.")
                 synapse.vresult = "invalid model"
                 return synapse
@@ -184,8 +205,13 @@ class Validator:
             self.axon.start()
             bt.logging.info("Validator server started.")
             
+            last_sync_time = time.time()
             while True:
-                time.sleep(1)
+                time.sleep(5)
+                current_time = time.time()
+                if current_time - last_sync_time >= 60:  # Sync every 60 seconds
+                    self.try_sync_metagraph(ttl=60)
+                    last_sync_time = current_time
                 bt.logging.debug(f"Current history: {self.history}")
         except Exception as e:
             bt.logging.error(f"Error in run loop: {str(e)}")

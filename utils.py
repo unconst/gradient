@@ -42,7 +42,7 @@ def get_model_and_tokenizer():
         
 def create_model_hash(model):
     """
-    Generates a SHA-256 hash of the model's state dictionary.
+    Generates a SHA-256 hash of the model's state dictionary by iterating through the values of each item.
 
     Args:
         model (torch.nn.Module): The model to hash.
@@ -52,10 +52,12 @@ def create_model_hash(model):
     """
     # Extract the state dictionary from the model which contains all the parameters
     model_state_dict = model.state_dict()
-    # Serialize the state dictionary into bytes using pickle
-    model_state_bytes = pickle.dumps(model_state_dict)
-    # Generate a SHA-256 hash from the serialized state dictionary
-    return hashlib.sha256(model_state_bytes).hexdigest()
+    # Concatenate all the model state values into a single string
+    concatenated_model_states = ''.join([str(value) for value in model_state_dict.values()])
+    # Encode the concatenated string into bytes
+    concatenated_model_states_bytes = concatenated_model_states.encode()
+    # Generate a SHA-256 hash from the concatenated bytes
+    return hashlib.sha256(concatenated_model_states_bytes).hexdigest()
 
 def create_gradient_hash(gradient: typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]]) -> str:
     """

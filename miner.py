@@ -92,6 +92,7 @@ class Miner:
 
             # Get model and tokenizer
             self.model, self.tokenizer = get_model_and_tokenizer()
+            self.model_hash = create_model_hash( self.model )
             bt.logging.info("Model and tokenizer loaded.")
             
             # Run the mining loop
@@ -141,7 +142,7 @@ class Miner:
         
         seal = Seal(
             pages = pages,
-            model_hash = create_model_hash( self.model ),
+            model_hash = self.model_hash,
             gradient_hash = create_gradient_hash( gradient ),
             batch_size = batch_size,
             sequence_length = sequence_length,
