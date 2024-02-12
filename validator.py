@@ -137,7 +137,7 @@ class Validator:
         try:
             # Check if the miner's public key is already in the history, if not, initialize it
             if synapse.dendrite.hotkey not in self.history:
-                self.history[synapse.dendrite.hotkey] = {'total': 0, 'verified': 0, 'valid': 0}
+                self.history[synapse.dendrite.hotkey] = {'total': 0, 'verified': 0, 'valid': 0, 'failed': 0, 'valid_pages': []}
             miner_history = self.history[synapse.dendrite.hotkey]
             
             # Randomly decide whether to verify or not based on the verify_rate
@@ -149,7 +149,7 @@ class Validator:
             
             # Check model hash.
             if not synapse.model_hash == self.model_hash:
-                bt.logging.debug(f"Model hash mismatch for miner {synapse.dendrite.hotkey}.")
+                bt.logging.debug(f"Model hash mismatch for miner {synapse.dendrite.hotkey}, got: {synapse.model_hash}, expected: {self.model_hash}.")
                 synapse.vresult = "invalid model"
                 return synapse
             
@@ -175,9 +175,10 @@ class Validator:
                 bt.logging.debug(f"Proof verified for miner {synapse.dendrite.hotkey}.")
                 miner_history['verified'] += 1
                 miner_history['valid'] += 1
+                miner_history['valid_pages'].extend( synapse.pages )
                 synapse.vresult = "succeeded verification"
             else:
-                bt.logging.debug(f"Proof failed for miner {synapse.dendrite.hotkey}.")
+                bt.logging.debug(f"Proof failed for miner {synapse.dendrite.hotkey}, got: {synapse.gradient_hash} expected: {gradient_hash}.")
                 miner_history['verified'] += 1
                 synapse.vresult = "failed verification"
 
