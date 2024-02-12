@@ -22,8 +22,9 @@ import multiprocessing
 import bittensor as bt
 from tqdm import tqdm
 
+from protocol import Seal
 from hparams import batch_size, sequence_length, topk_percent, pages_per_proof
-from utils import create_proof, get_model_and_tokenizer, create_seal
+from utils import create_gradient, get_model_and_tokenizer, create_model_hash, create_gradient_hash
 from data import SubsetFalconLoader
 
 class Miner:
@@ -93,25 +94,26 @@ class Miner:
             self.model, self.tokenizer = get_model_and_tokenizer()
             bt.logging.info("Model and tokenizer loaded.")
             
-            global_steps = 0
-            last_sync_time = time.time()
-            last_step_time = time.time()
-            total_tokens = 0
+            # Run the mining loop
+            global_steps, total_tokens = 0, 0
+            last_sync_time = last_step_time = time.time()
             while True:
-                tokens_mined = batch_size * sequence_length  # Calculate tokens mined based on batch size and sequence length
                 self.mine()
                 current_time = time.time()
+                tokens_mined = batch_size * sequence_length
+                total_tokens += tokens_mined
+                
                 step_duration = current_time - last_step_time
                 steps_per_second = 1 / step_duration if step_duration > 0 else 0
                 tokens_per_second = tokens_mined / step_duration if step_duration > 0 else 0
-                total_tokens += tokens_mined
-                if current_time - last_sync_time >= 600:  # 600 seconds = 10 minutes
+                
+                if current_time - last_sync_time >= 600:  # Sync every 10 minutes
                     self.try_sync_metagraph(ttl=60)
                     last_sync_time = current_time
+                
                 global_steps += 1
                 bt.logging.success(f"Global step {global_steps}, Steps/s: {steps_per_second:.2f}, Tokens/s: {tokens_per_second:.2f}, Total tokens: {total_tokens}")
                 last_step_time = current_time
-
         except Exception as e:
             bt.logging.error(f"Error occurred: {str(e)}")
 
@@ -124,7 +126,7 @@ class Miner:
         
         # Create proof for the selected pages
         bt.logging.debug("Creating proof for selected pages.")
-        proof = create_proof(
+        gradient = create_gradient(
             self.model,
             self.tokenizer,
             pages=pages,
@@ -136,7 +138,15 @@ class Miner:
         
         # Create seal from the proof
         bt.logging.debug("Creating seal from proof.")
-        seal = create_seal(self.model, proof, pages, batch_size, sequence_length, topk_percent)
+        
+        seal = Seal(
+            pages = pages,
+            model_hash = create_model_hash( self.model ),
+            gradient_hash = create_gradient_hash( gradient ),
+            batch_size = batch_size,
+            sequence_length = sequence_length,
+            topk_percent = topk_percent
+        )
         bt.logging.info(f"Seal created: {seal}")
         
         # Send seal to validators

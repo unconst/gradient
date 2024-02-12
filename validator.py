@@ -21,9 +21,9 @@ import random
 import asyncio
 import argparse
 import bittensor as bt
-from protocol import Verify
+from protocol import Seal
 from hparams import pages_per_proof, topk_percent, sequence_length, batch_size, verify_rate
-from utils import get_model_and_tokenizer, create_proof, compute_proof_hash
+from utils import get_model_and_tokenizer, create_gradient, create_gradient_hash, create_model_hash
 
 class Validator:
     """
@@ -78,6 +78,7 @@ class Validator:
         
         # Load model and tokenizer
         self.model, self.tokenizer = get_model_and_tokenizer()
+        self.model_hash = create_model_hash(self.model)
         self.history = {}
 
         # Setup axon and attach verification and blacklist functions
@@ -85,7 +86,7 @@ class Validator:
         self.axon.attach(forward_fn=self.verify, blacklist_fn=self.blacklist)
         bt.logging.info("Validator initialized.")
         
-    async def blacklist(self, synapse: Verify) -> typing.Tuple[bool, str]:
+    async def blacklist(self, synapse: Seal) -> typing.Tuple[bool, str]:
         """
         Checks if a miner is registered in the metagraph and should be blacklisted.
         
@@ -101,7 +102,7 @@ class Validator:
             return True, 'miner not registered in metagraph'
         return False, 'success'
     
-    async def verify(self, synapse: Verify) -> Verify:
+    async def verify(self, synapse: Seal) -> Seal:
         """
         Verifies the proof of work provided by a miner.
         
@@ -118,37 +119,39 @@ class Validator:
             miner_history = self.history[synapse.public_key]
             
             # Randomly decide whether to verify or not based on the verify_rate
+            miner_history['total'] += 1
             if random.random() > verify_rate:
                 bt.logging.trace("Skipping verification due to rate.")
-                miner_history['total'] += 1
+                return synapse
+            
+            # Check model hash.
+            if synapse.model_hash != self.model_hash:
+                bt.logging.info(f"Model hash mismatch for miner {synapse.public_key}.")
+                return synapse
+            
+            # Check hparams
+            if synapse.batch_size != batch_size or synapse.sequence_length != sequence_length or synapse.topk_percent != topk_percent:
+                bt.logging.info(f"Hparams mismatch for miner {synapse.public_key}.")
                 return synapse
             
             # Perform verification
             bt.logging.debug(f"Verifying proof for miner {synapse.public_key}.")
-            proof = create_proof(
+            gradient = create_gradient(
                 self.model,
                 self.tokenizer,
-                pages=synapse.pages,
-                batch_size=batch_size,
-                sequence_length=sequence_length,
-                device=self.config.device,
-                topk_percent=topk_percent
+                pages = synapse.pages,
+                batch_size = batch_size,
+                sequence_length = sequence_length,
+                device = self.config.device,
+                topk_percent = topk_percent
             )
-            hash_ = compute_proof_hash(
-                proof,
-                synapse.pages,
-                batch_size,
-                sequence_length,
-                topk_percent
-            )
-            if hash_ == synapse.hash:
+            gradient_hash = create_gradient_hash( gradient = gradient )
+            if gradient_hash == synapse.hash:
                 bt.logging.info(f"Proof verified for miner {synapse.public_key}.")
-                miner_history['total'] += 1
                 miner_history['verified'] += 1
                 miner_history['valid'] += 1
             else:
                 bt.logging.info(f"Proof failed for miner {synapse.public_key}.")
-                miner_history['total'] += 1
                 miner_history['verified'] += 1
         except Exception as e:
             bt.logging.error(f"Error during verification: {str(e)}")
@@ -161,6 +164,12 @@ class Validator:
         """
         bt.logging.info("Validator run loop started.")
         try:
+            # Check if the validator is registered and the subnet exists.
+            if not self.subtensor.subnet_exists(self.config.netuid):
+                raise ValueError(f"Subnet: {self.config.netuid} does not exist on network: {self.config.subtensor.network}\n")
+            if self.wallet.hotkey.ss58_address not in self.metagraph.hotkeys:
+                raise ValueError(f"Validator is not registered to subnet {self.config.netuid}. Please register first.\n")
+            
             bt.logging.info("Serving validator axon.")
             self.axon.serve(netuid=self.config.netuid, subtensor=self.subtensor)
             self.axon.start()
