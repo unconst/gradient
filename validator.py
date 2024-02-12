@@ -45,7 +45,7 @@ class Validator:
         parser = argparse.ArgumentParser()
         parser.add_argument("--netuid", type=int, default=81, help="Netuid to mine on.")
         parser.add_argument("--device", type=str, default="cpu", help="Device to use.")
-        
+        parser.add_argument("--verify_rate", type=float, default=0.01, help="Rate of verification.")        
         # Add Bittensor-specific arguments to the parser
         bt.axon.add_args(parser)
         bt.wallet.add_args(parser)
@@ -121,7 +121,7 @@ class Validator:
             
             # Randomly decide whether to verify or not based on the verify_rate
             miner_history['total'] += 1
-            if random.random() > verify_rate:
+            if random.random() > self.config.verify_rate:
                 bt.logging.debug("Skipping verification due to rate.")
                 synapse.vresult = "skipped verification"
                 return synapse
