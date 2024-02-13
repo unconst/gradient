@@ -26,7 +26,7 @@ import bittensor as bt
 from data import SubsetFalconLoader
 from protocol import Gradient
 from hparams import pages_per_proof, topk_percent, sequence_length, batch_size
-from utils import get_model_and_tokenizer, create_gradient, create_gradient_hash, create_model_hash, topk_gradient
+from utils import get_model_and_tokenizer, create_model_hash
 
 class Validator:
     """
