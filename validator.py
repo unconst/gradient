@@ -81,7 +81,6 @@ class Validator:
         
         # Load model and tokenizer
         self.model, self.tokenizer = get_model_and_tokenizer()
-        self.model_hash = create_model_hash(self.model)
         self.history = {}
 
         # Setup axon and attach verification and blacklist functions
