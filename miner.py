@@ -16,15 +16,16 @@
 # DEALINGS IN THE SOFTWARE.
 
 import time
+import typing
 import random
 import argparse
 import multiprocessing
 import bittensor as bt
 from tqdm import tqdm
 
-from protocol import Seal
+from protocol import Gradient
 from hparams import batch_size, sequence_length, topk_percent, pages_per_proof
-from utils import create_gradient, get_model_and_tokenizer, create_model_hash, create_gradient_hash
+from utils import get_model_and_tokenizer, topk_gradient
 from data import SubsetFalconLoader
 
 class Miner:
@@ -92,7 +93,6 @@ class Miner:
 
             # Get model and tokenizer
             self.model, self.tokenizer = get_model_and_tokenizer()
-            self.model_hash = create_model_hash( self.model )
             bt.logging.info("Model and tokenizer loaded.")
             
             # Run the mining loop
@@ -124,37 +124,55 @@ class Miner:
         """
         # Generate random pages
         pages = [random.randint(0, SubsetFalconLoader.max_pages) for _ in range(pages_per_proof)]
-        
-        # Create proof for the selected pages
-        bt.logging.debug("Creating proof for selected pages.")
-        gradient = create_gradient(
-            self.model,
-            self.tokenizer,
-            pages=pages,
-            batch_size=batch_size,
-            sequence_length=sequence_length,
-            device=self.config.device,
-            topk_percent=topk_percent
+                
+        # Create batches of data to process using the SubsetFalconLoader with the given parameters
+        batches = list(
+            SubsetFalconLoader(
+                tokenizer = self.tokenizer,
+                batch_size = batch_size, 
+                sequence_length = sequence_length,
+                rows = pages
+            )
         )
         
-        # Create seal from the proof
-        bt.logging.debug("Creating seal from proof.")
+        # Move the model to the specified device (CPU or GPU)
+        self.model.to(self.config.device)
         
-        seal = Seal(
+        # Reset gradients in the model to zero
+        self.model.zero_grad()
+        
+        # Process each batch of data
+        for batch in batches:
+            # Move the batch to the specified device
+            inputs = batch.to(self.config.device)
+            # Pass the inputs through the model and calculate the loss
+            outputs = self.model(inputs, labels=inputs)
+            # Normalize the loss by the number of batches
+            outputs.loss /= len(batches)
+            # Backpropagate the loss to compute gradients
+            outputs.loss.backward()
+            # Exit the loop after processing the first batch for demonstration purposes
+            break
+        
+        # Extract the top-k percent gradients from the model
+        gradient = topk_gradient( self.model, topk_percent )
+        
+        # Serialize the gradient to a bt.Tensors
+        grad_idx: typing.Dict[ str, bt.Tensor ] = {}
+        grad_vals: typing.Dict[ str, bt.Tensor ] = {}
+        for key in gradient:
+            grad_idx[key] = bt.Tensor.serialize( gradient[key][0] )
+            grad_vals[key] = bt.Tensor.serialize( gradient[key][1] )
+        synapse = Gradient(
             pages = pages,
-            model_hash = self.model_hash,
-            gradient_hash = create_gradient_hash( gradient ),
-            batch_size = batch_size,
-            sequence_length = sequence_length,
-            topk_percent = topk_percent
+            gradient_idx = grad_idx,
+            gradient_vals = grad_vals,
         )
-        bt.logging.info(f"Seal created: {seal}")
-        
+        size_in_mb = synapse.get_total_size() / (1024 * 1024)
+        bt.logging.info(f"Synapse created with size: {size_in_mb} MB")
         # Send seal to validators
         validator_axons = [self.metagraph.axons[uid] for uid in self.metagraph.uids[self.metagraph.validator_permit]]
-        responses = self.dendrite.query(validator_axons, seal, timeout = 1 )
-        for response in responses:
-            bt.logging.debug(f"Received response from validator: {response.vresult}")
+        responses = self.dendrite.query(validator_axons, synapse, timeout = 1 )
 
 if __name__ == "__main__":
     miner = Miner()

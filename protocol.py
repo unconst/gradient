@@ -18,11 +18,7 @@
 import typing
 import bittensor as bt
 
-class Seal( bt.Synapse ):
+class Gradient( bt.Synapse ):
     pages: typing.List[int]
-    model_hash: str
-    gradient_hash: str
-    sequence_length: int
-    batch_size: int
-    topk_percent: float
-    vresult: str = None
+    gradient_idx: typing.Dict[ str, bt.Tensor ] 
+    gradient_vals: typing.Dict[ str, bt.Tensor ] 

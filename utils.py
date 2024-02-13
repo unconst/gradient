@@ -22,7 +22,7 @@ import pickle
 import hashlib
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from data import SubsetFalconLoader
-from protocol import Seal
+from protocol import Gradient
 
 def get_model_and_tokenizer():
     """
@@ -39,42 +39,6 @@ def get_model_and_tokenizer():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name)
     # Return both the model and tokenizer as a tuple
     return model, tokenizer
-        
-def create_model_hash(model):
-    """
-    Generates a SHA-256 hash of the model's state dictionary by iterating through the values of each item.
-
-    Args:
-        model (torch.nn.Module): The model to hash.
-
-    Returns:
-        str: The SHA-256 hash of the model's state dictionary.
-    """
-    # Extract the state dictionary from the model which contains all the parameters
-    model_state_dict = model.state_dict()
-    # Concatenate all the model state values into a single string
-    concatenated_model_states = ''.join([str(value) for value in model_state_dict.values()])
-    # Encode the concatenated string into bytes
-    concatenated_model_states_bytes = concatenated_model_states.encode()
-    # Generate a SHA-256 hash from the concatenated bytes
-    return hashlib.sha256(concatenated_model_states_bytes).hexdigest()
-
-def create_gradient_hash(gradient: typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]]) -> str:
-    """
-    Computes a SHA-256 hash of the gradient proof.
-
-    Args:
-        gradient (Dict[str, Tuple[torch.Tensor, torch.Tensor]]): The gradient proof to hash.
-
-    Returns:
-        str: The SHA-256 hash of the gradient proof.
-    """
-    # Concatenate all the gradient values into a single string
-    concatenated_tensors = ''.join([str(item) for item in gradient.values()])
-    # Encode the concatenated string into bytes
-    concatenated_tensors = concatenated_tensors.encode()
-    # Generate a SHA-256 hash from the concatenated bytes
-    return hashlib.sha256(concatenated_tensors).hexdigest()
 
 def topk_gradient(model: torch.nn.Module, topk_percent: float) -> typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]]:
     """
@@ -110,103 +74,6 @@ def topk_gradient(model: torch.nn.Module, topk_percent: float) -> typing.Dict[st
     # Return the dictionary containing the top-k gradient data
     return gradient_data
 
-def create_gradient( 
-        model: torch.nn.Module,
-        tokenizer: 'tokenizer',
-        pages: typing.List[int], 
-        batch_size: int, 
-        sequence_length: int,
-        device: str = 'cpu',
-        topk_percent: float = 0.01
-    ) -> typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]]:
-    """
-    Generates a gradient based on the top-k percent of the model's parameters.
-
-    Args:
-        model (torch.nn.Module): The model for gradient computation.
-        tokenizer: The tokenizer for data processing.
-        pages (List[int]): The pages to process.
-        batch_size (int): The batch size for processing.
-        sequence_length (int): The sequence length for processing.
-        device (str): The computation device ('cpu' or 'gpu').
-        topk_percent (float): The percentage of top gradients to retain.
-
-    Returns:
-        Dict[str, Tuple[torch.Tensor, torch.Tensor]]: The top-k gradients.
-    """
-    # Move the model to the specified device (CPU or GPU)
-    model.to(device)
-    
-    # Create batches of data to process using the SubsetFalconLoader with the given parameters
-    batches = list(
-        SubsetFalconLoader(
-            tokenizer=tokenizer,
-            batch_size=batch_size, 
-            sequence_length=sequence_length,
-            rows=pages
-        )
-    )
-    
-    # Reset gradients in the model to zero
-    model.zero_grad()
-    
-    # Process each batch of data
-    for batch in batches:
-        # Move the batch to the specified device
-        inputs = batch.to(device)
-        # Pass the inputs through the model and calculate the loss
-        outputs = model(inputs, labels=inputs)
-        # Normalize the loss by the number of batches
-        outputs.loss /= len(batches)
-        # Backpropagate the loss to compute gradients
-        outputs.loss.backward()
-        # Exit the loop after processing the first batch for demonstration purposes
-        break
-    
-    # Extract the top-k percent gradients from the model
-    gradient = topk_gradient(model, topk_percent)
-    
-    # Return the top-k gradients
-    return gradient
-
-    
-def check_equality(
-        proof_A: typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]],
-        proof_B: typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]],
-    ):
-    """
-    Checks if two gradient proofs are equal.
-
-    Args:
-        proof_A (Dict[str, Tuple[torch.Tensor, torch.Tensor]]): The first gradient proof.
-        proof_B (Dict[str, Tuple[torch.Tensor, torch.Tensor]]): The second gradient proof.
-
-    Returns:
-        bool: True if the proofs are equal, False otherwise.
-    """
-    # Iterate through each item in the first proof
-    for key, (indices_A, values_A) in proof_A.items():
-        # Check if the key exists in the second proof
-        if key not in proof_B:
-            # If not, the proofs are not equal
-            return False
-        # Retrieve the corresponding item from the second proof
-        indices_B, values_B = proof_B[key]
-        
-        # Convert data types for comparison
-        indices_A = indices_A.to(torch.int32)
-        values_A = values_A.to(torch.float32)
-        indices_B = indices_B.to(torch.int32)
-        values_B = values_B.to(torch.float32)
-        
-        # Check if the indices and values are equal
-        if not (torch.equal(indices_A, indices_B) and torch.allclose(values_A, values_B)):
-            # If not, the proofs are not equal
-            return False
-    # If all checks pass, the proofs are equal
-    return True
-
-
 def accumulate_proofs(model, proofs):
     """
     Accumulates multiple gradient proofs onto a model's gradients.
@@ -237,3 +104,138 @@ def accumulate_proofs(model, proofs):
         
         # Reshape the gradient tensor back to its original shape
         param.grad = grad_flat.view_as(param.grad)
+
+
+        
+# def create_model_hash(model):
+#     """
+#     Generates a SHA-256 hash of the model's state dictionary by iterating through the values of each item.
+
+#     Args:
+#         model (torch.nn.Module): The model to hash.
+
+#     Returns:
+#         str: The SHA-256 hash of the model's state dictionary.
+#     """
+#     # Extract the state dictionary from the model which contains all the parameters
+#     model_state_dict = model.state_dict()
+#     # Concatenate all the model state values into a single string
+#     concatenated_model_states = ''.join([ str(value.cpu().numpy().tobytes()) for value in model_state_dict.values()])
+#     # Encode the concatenated string into bytes
+#     concatenated_model_states_bytes = concatenated_model_states.encode()
+#     # Generate a SHA-256 hash from the concatenated bytes
+#     return hashlib.sha256(concatenated_model_states_bytes).hexdigest()
+
+# def create_gradient_hash(gradient: typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]]) -> str:
+#     """
+#     Computes a SHA-256 hash of the gradient proof.
+
+#     Args:
+#         gradient (Dict[str, Tuple[torch.Tensor, torch.Tensor]]): The gradient proof to hash.
+
+#     Returns:
+#         str: The SHA-256 hash of the gradient proof.
+#     """
+#     # Concatenate all the gradient values into a single string
+#     concatenated_tensors = ''.join([ str(item[1].cpu().numpy().tobytes()) for item in gradient.values()])
+#     # Encode the concatenated string into bytes
+#     concatenated_tensors = concatenated_tensors.encode()
+#     # Generate a SHA-256 hash from the concatenated bytes
+#     return hashlib.sha256(concatenated_tensors).hexdigest()
+
+
+# def create_gradient( 
+#         model: torch.nn.Module,
+#         tokenizer: 'tokenizer',
+#         pages: typing.List[int], 
+#         batch_size: int, 
+#         sequence_length: int,
+#         device: str = 'cpu',
+#         topk_percent: float = 0.01
+#     ) -> typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]]:
+#     """
+#     Generates a gradient based on the top-k percent of the model's parameters.
+
+#     Args:
+#         model (torch.nn.Module): The model for gradient computation.
+#         tokenizer: The tokenizer for data processing.
+#         pages (List[int]): The pages to process.
+#         batch_size (int): The batch size for processing.
+#         sequence_length (int): The sequence length for processing.
+#         device (str): The computation device ('cpu' or 'gpu').
+#         topk_percent (float): The percentage of top gradients to retain.
+
+#     Returns:
+#         Dict[str, Tuple[torch.Tensor, torch.Tensor]]: The top-k gradients.
+#     """
+#     # Move the model to the specified device (CPU or GPU)
+#     model.to(device)
+    
+#     # Create batches of data to process using the SubsetFalconLoader with the given parameters
+#     batches = list(
+#         SubsetFalconLoader(
+#             tokenizer=tokenizer,
+#             batch_size=batch_size, 
+#             sequence_length=sequence_length,
+#             rows=pages
+#         )
+#     )
+    
+#     # Reset gradients in the model to zero
+#     model.zero_grad()
+    
+#     # Process each batch of data
+#     for batch in batches:
+#         # Move the batch to the specified device
+#         inputs = batch.to(device)
+#         # Pass the inputs through the model and calculate the loss
+#         outputs = model(inputs, labels=inputs)
+#         # Normalize the loss by the number of batches
+#         outputs.loss /= len(batches)
+#         # Backpropagate the loss to compute gradients
+#         outputs.loss.backward()
+#         # Exit the loop after processing the first batch for demonstration purposes
+#         break
+    
+#     # Extract the top-k percent gradients from the model
+#     gradient = topk_gradient(model, topk_percent)
+    
+#     # Return the top-k gradients
+#     return gradient
+
+    
+# def check_equality(
+#         proof_A: typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]],
+#         proof_B: typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]],
+#     ):
+#     """
+#     Checks if two gradient proofs are equal.
+
+#     Args:
+#         proof_A (Dict[str, Tuple[torch.Tensor, torch.Tensor]]): The first gradient proof.
+#         proof_B (Dict[str, Tuple[torch.Tensor, torch.Tensor]]): The second gradient proof.
+
+#     Returns:
+#         bool: True if the proofs are equal, False otherwise.
+#     """
+#     # Iterate through each item in the first proof
+#     for key, (indices_A, values_A) in proof_A.items():
+#         # Check if the key exists in the second proof
+#         if key not in proof_B:
+#             # If not, the proofs are not equal
+#             return False
+#         # Retrieve the corresponding item from the second proof
+#         indices_B, values_B = proof_B[key]
+        
+#         # Convert data types for comparison
+#         indices_A = indices_A.to(torch.int32)
+#         values_A = values_A.to(torch.float32)
+#         indices_B = indices_B.to(torch.int32)
+#         values_B = values_B.to(torch.float32)
+        
+#         # Check if the indices and values are equal
+#         if not (torch.equal(indices_A, indices_B) and torch.allclose(values_A, values_B)):
+#             # If not, the proofs are not equal
+#             return False
+#     # If all checks pass, the proofs are equal
+#     return True

@@ -16,15 +16,17 @@
 # DEALINGS IN THE SOFTWARE.
 
 import time
+import torch
 import typing
 import random
 import asyncio
 import argparse
 import multiprocessing
 import bittensor as bt
-from protocol import Seal
+from data import SubsetFalconLoader
+from protocol import Gradient
 from hparams import pages_per_proof, topk_percent, sequence_length, batch_size
-from utils import get_model_and_tokenizer, create_gradient, create_gradient_hash, create_model_hash
+from utils import get_model_and_tokenizer, create_gradient, create_gradient_hash, create_model_hash, topk_gradient
 
 class Validator:
     """
@@ -83,8 +85,8 @@ class Validator:
         self.history = {}
 
         # Setup axon and attach verification and blacklist functions
-        self.axon = bt.axon(wallet=self.wallet, config=self.config)
-        self.axon.attach(forward_fn=self.verify, blacklist_fn=self.blacklist)
+        self.axon = bt.axon( wallet=self.wallet, config=self.config )
+        self.axon.attach( forward_fn = self.gradient, blacklist_fn=self.blacklist )
         bt.logging.info("Validator initialized.")
         
     def try_sync_metagraph(self, ttl: int):
@@ -107,7 +109,7 @@ class Validator:
         # Load new state.
         self.metagraph.load()
         
-    async def blacklist(self, synapse: Seal) -> typing.Tuple[bool, str]:
+    async def blacklist(self, synapse: Gradient) -> typing.Tuple[bool, str]:
         """
         Checks if a miner is registered in the metagraph and should be blacklisted.
         
@@ -123,7 +125,7 @@ class Validator:
             return True, 'miner not registered in metagraph'
         return False, 'success'
     
-    async def verify(self, synapse: Seal) -> Seal:
+    async def gradient(self, synapse: Gradient) -> Gradient:
         """
         Verifies the proof of work provided by a miner.
         
@@ -133,61 +135,94 @@ class Validator:
         Returns:
             Verify: The original verification request, potentially modified based on verification result.
         """
-        bt.logging.debug(f"Received verification request from miner {synapse.dendrite.hotkey}.")
-        try:
-            # Check if the miner's public key is already in the history, if not, initialize it
-            if synapse.dendrite.hotkey not in self.history:
-                self.history[synapse.dendrite.hotkey] = {'total': 0, 'verified': 0, 'valid': 0, 'failed': 0, 'valid_pages': []}
-            miner_history = self.history[synapse.dendrite.hotkey]
-            
-            # Randomly decide whether to verify or not based on the verify_rate
-            miner_history['total'] += 1
-            if random.random() > self.config.verify_rate:
-                bt.logging.debug("Skipping verification due to rate.")
-                synapse.vresult = "skipped verification"
-                return synapse
-            
-            # Check model hash.
-            if not synapse.model_hash == self.model_hash:
-                bt.logging.debug(f"Model hash mismatch for miner {synapse.dendrite.hotkey}, got: {synapse.model_hash}, expected: {self.model_hash}.")
-                synapse.vresult = "invalid model"
-                return synapse
-            
-            # Check hparams
-            if synapse.batch_size != batch_size or synapse.sequence_length != sequence_length or synapse.topk_percent != topk_percent:
-                bt.logging.debug(f"Hparams mismatch for miner {synapse.dendrite.hotkey}.")
-                synapse.vresult = "invalid hparams"
-                return synapse
-            
-            # Perform verification
-            bt.logging.debug(f"Verifying proof for miner {synapse.dendrite.hotkey}.")
-            gradient = create_gradient(
-                self.model,
-                self.tokenizer,
-                pages = synapse.pages,
-                batch_size = batch_size,
-                sequence_length = sequence_length,
-                device = self.config.device,
-                topk_percent = topk_percent
-            )
-            gradient_hash = create_gradient_hash( gradient = gradient )
-            if gradient_hash == synapse.gradient_hash:
-                bt.logging.debug(f"Proof verified for miner {synapse.dendrite.hotkey}.")
-                miner_history['verified'] += 1
-                miner_history['valid'] += 1
-                miner_history['valid_pages'].extend( synapse.pages )
-                synapse.vresult = "succeeded verification"
-            else:
-                bt.logging.debug(f"Proof failed for miner {synapse.dendrite.hotkey}, got: {synapse.gradient_hash} expected: {gradient_hash}.")
-                miner_history['verified'] += 1
-                synapse.vresult = "failed verification"
+        bt.logging.debug(f"Received gradient from miner {synapse.dendrite.hotkey}.")
 
-        except Exception as e:
-            bt.logging.debug(f"Error during verification: {str(e)}")
-            synapse.vresult = "error during verification"
+        # Deserialize the miner's gradient
+        miner_gradient: typing.Dict[ str, typing.Tuple(torch.LongTensor, torch.FloatTensor) ] = {}
+        for ( ( key, val ), (_, idx) ) in list(zip(synapse.gradient_vals.items(), synapse.gradient_idx.items())):
+            miner_gradient[key] = (idx.tensor(), val.tensor())    
+            
+        return synapse
+    
+        # try:
+        #     # Check if the miner's public key is already in the history, if not, initialize it
+        #     if synapse.dendrite.hotkey not in self.history:
+        #         self.history[synapse.dendrite.hotkey] = {'total': 0, 'verified': 0, 'valid': 0, 'failed': 0, 'valid_pages': []}
+        #     miner_history = self.history[synapse.dendrite.hotkey]
+            
+        #     # Deserialize the miner's gradient
+        #     miner_gradient: typing.Dict[ str, typing.Tuple(torch.LongTensor, torch.FloatTensor) ] = {}
+        #     for ( ( key, val ), (_, idx) ) in list(zip(synapse.gradient_vals.items(), synapse.gradient_idx.items())):
+        #         miner_gradient[key] = (idx.tensor(), val.tensor())        
+            
+        #     # Randomly decide whether to verify or not based on the verify_rate
+        #     miner_history['total'] += 1
+        #     if random.random() > self.config.verify_rate:
+        #         bt.logging.debug("Skipping verification due to rate.")
+        #         synapse.vresult = "skipped verification"
+        #         return synapse
+            
+        #     # Check model hash.
+        #     if not synapse.model_hash == self.model_hash:
+        #         bt.logging.debug(f"Model hash mismatch for miner {synapse.dendrite.hotkey}, got: {synapse.model_hash}, expected: {self.model_hash}.")
+        #         synapse.vresult = "invalid model"
+        #         return synapse
+            
+        #     # Check hparams
+        #     if synapse.batch_size != batch_size or synapse.sequence_length != sequence_length or synapse.topk_percent != topk_percent:
+        #         bt.logging.debug(f"Hparams mismatch for miner {synapse.dendrite.hotkey}.")
+        #         synapse.vresult = "invalid hparams"
+        #         return synapse
+                        
+        #     # Create batches of data to process using the SubsetFalconLoader with the given parameters
+        #     batches = list(
+        #         SubsetFalconLoader(
+        #             tokenizer = self.tokenizer,
+        #             batch_size = batch_size, 
+        #             sequence_length = sequence_length,
+        #             rows = synapse.pages
+        #         )
+        #     )
+            
+        #     # Move the model to the specified device (CPU or GPU)
+        #     self.model.to(self.device)
+            
+        #     # Reset gradients in the model to zero
+        #     self.model.zero_grad()
+            
+        #     # Process each batch of data
+        #     for batch in batches:
+        #         # Move the batch to the specified device
+        #         inputs = batch.to(self.device)
+        #         # Pass the inputs through the model and calculate the loss
+        #         outputs = self.model(inputs, labels=inputs)
+        #         # Normalize the loss by the number of batches
+        #         outputs.loss /= len(batches)
+        #         # Backpropagate the loss to compute gradients
+        #         outputs.loss.backward()
+        #         # Exit the loop after processing the first batch for demonstration purposes
+        #         break
+            
+        #     # Extract the top-k percent gradients from the model
+        #     gradient = topk_gradient( self.model, topk_percent )
+            
+        #     if gradient_hash == synapse.gradient_hash:
+        #         bt.logging.debug(f"Proof verified for miner {synapse.dendrite.hotkey}.")
+        #         miner_history['verified'] += 1
+        #         miner_history['valid'] += 1
+        #         miner_history['valid_pages'].extend( synapse.pages )
+        #         synapse.vresult = "succeeded verification"
+        #     else:
+        #         bt.logging.debug(f"Proof failed for miner {synapse.dendrite.hotkey}, got: {synapse.gradient_hash} expected: {gradient_hash}.")
+        #         miner_history['verified'] += 1
+        #         synapse.vresult = "failed verification"
 
-        finally:
-            return synapse
+        # except Exception as e:
+        #     bt.logging.debug(f"Error during verification: {str(e)}")
+        #     synapse.vresult = "error during verification"
+
+        # finally:
+        #     return synapse
             
     def run(self):
         """
