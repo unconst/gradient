@@ -95,6 +95,10 @@ class Miner:
             self.model, self.tokenizer = get_model_and_tokenizer()
             bt.logging.info("Model and tokenizer loaded.")
             
+            # Get model host. 
+            self.master = self.metagraph.axons[self.metagraph.S.argmax()]
+            bt.logging.info(f"Model host with the most stake: {self.master}")
+            
             # Run the mining loop
             global_steps, total_tokens = 0, 0
             last_sync_time = last_step_time = time.time()
@@ -169,11 +173,12 @@ class Miner:
             gradient_vals = grad_vals,
         )
         size_in_mb = synapse.get_total_size() / (1024 * 1024)
-        bt.logging.info(f"Synapse created with size: {size_in_mb} MB")
         # Send seal to validators
-        validator_axons = [self.metagraph.axons[uid] for uid in self.metagraph.uids[self.metagraph.validator_permit]]
-        responses = self.dendrite.query(validator_axons, synapse, timeout = 1 )
-
+        start_time = time.time()
+        responses = self.dendrite.query(self.master, synapse, timeout = 30 )
+        process_time = time.time() - start_time
+        bt.logging.info(f"Synapse sent with size: {size_in_mb} MB in {process_time} seconds.")
+        
 if __name__ == "__main__":
     miner = Miner()
     miner.run()
