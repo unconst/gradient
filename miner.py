@@ -26,8 +26,10 @@ from data import SubsetFalconLoader
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
 parser = argparse.ArgumentParser(description="Validator config")
-parser.add_argument("--uid", type=int, default="0", help="Miner UID")
+parser.add_argument("--uid", type=int, default=0, help="Miner UID")
+parser.add_argument("--device", type=str, default="cpu", help="Device to run the model on (cpu, cuda)")
 config = bt.config(parser)
+device = torch.device(config.device)
 save_path = f'storage/grads/miner_{config.uid}'
 os.makedirs(save_path, exist_ok=True)
 bt.logging.info(f"Created/verified save path at {save_path}")
@@ -37,10 +39,10 @@ tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 bt.logging.info(f"Loaded tokenizer for model {model_name}")
 
 def get_model():
-    model = GPT2LMHeadModel.from_pretrained(model_name)
-    model.load_state_dict(torch.load('storage/model.pt'))
+    model = GPT2LMHeadModel.from_pretrained(model_name).to(device)
+    model.load_state_dict(torch.load('storage/model.pt', map_location=device))
     tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-    bt.logging.info(f"Model {model_name} loaded with state from storage/model.pt")
+    bt.logging.info(f"Model {model_name} loaded with state from storage/model.pt and moved to {config.device}")
     return model, tokenizer
 
 def get_model_hash():
@@ -71,8 +73,8 @@ while True:
         )
         model.zero_grad()
         for batch in tqdm(batches):
+            batch = batch.to(device)
             model(batch, labels=batch).loss.backward()
         gradient = topk_gradient(model, topk_percent=0.1)
         torch.save(gradient, f'{save_path}/{page}-{mhash}.pt')
         bt.logging.info(f"Saved top-k gradients to {save_path}/{page}-{mhash}.pt")
-    

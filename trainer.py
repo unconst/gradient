@@ -28,16 +28,18 @@ from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
 # Setting up the argument parser for configuration
 parser = argparse.ArgumentParser(description="Owner config")
+parser.add_argument("--device", type=str, default="cpu", help="Device to run the model on (cpu, cuda)")
 bt.logging.add_args(parser)  # Adding bittensor logging arguments to the parser
 config = bt.config(parser)  # Parsing the arguments to get the configuration
+device = torch.device(config.device)  # Setting the device
 bt.logging.info("Starting the owner process.")  # Logging the start of the process
 
 # Load the GPT-2 model and tokenizer, and initialize the optimizer
 model_name = "gpt2"
-model = GPT2LMHeadModel.from_pretrained(model_name)  # Loading the model
+model = GPT2LMHeadModel.from_pretrained(model_name).to(device)  # Loading the model and moving it to the specified device
 tokenizer = GPT2Tokenizer.from_pretrained(model_name)  # Loading the tokenizer
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  # Initializing the optimizer with learning rate 0.001
-bt.logging.info(f"Loaded {model_name} model, tokenizer, and initialized optimizer.")  # Logging the successful loading and initialization
+bt.logging.info(f"Loaded {model_name} model, tokenizer, and initialized optimizer on {config.device}.")  # Logging the successful loading and initialization
 
 # Function to update the saved model state
 def update():
@@ -47,7 +49,7 @@ def update():
         f.write(model_hash)
     bt.logging.info("Updated model state and saved to storage.")  # Logging the update
     
-def compute_loss( model, tokenizer, device='cpu'):
+def compute_loss(model, tokenizer, device='cpu'):
     page = random.randint(0, SubsetFalconLoader.max_pages)
     batches = list(
         SubsetFalconLoader(
@@ -61,10 +63,12 @@ def compute_loss( model, tokenizer, device='cpu'):
         total_loss = 0.0
         num_batches = len(batches)
         for batch in tqdm(batches, desc="Computing Loss"):
-            total_loss += model(batch, labels=batch).loss.item()
+            inputs = batch.to(device)
+            outputs = model(inputs, labels=inputs)
+            total_loss += outputs.loss.item()
     return total_loss / num_batches
 
-def yield_gradients( model_hash: str = "*", miner_uid: str = "*" ):
+def yield_gradients(model_hash: str = "*", miner_uid: str = "*"):
     grad_files_pattern = f'storage/grads/miner_{miner_uid}/*-{model_hash}.pt'
     while True:
         grad_files = glob.glob(grad_files_pattern)
@@ -74,16 +78,16 @@ def yield_gradients( model_hash: str = "*", miner_uid: str = "*" ):
             model_hash = model_hash.split('.')[0]
             miner_uid = grad_file.split('/')[-2].split('_')[1]
             if os.path.exists(grad_file):
-                gradients = torch.load(grad_file)
+                gradients = torch.load(grad_file, map_location=device)
                 yield miner_uid, model_hash, page_number, gradients
                 
-def accumulate_gradient( model, gradient ):
+def accumulate_gradient(model, gradient):
     # Apply the gradients to the model
     for name, param in model.named_parameters():
         if not param.requires_grad or name not in gradient: continue
-        if param.grad is None: param.grad = torch.zeros_like(param.data)
+        if param.grad is None: param.grad = torch.zeros_like(param.data, device=device)
         indices, values = gradient[name]
-        accumulated_grad = torch.zeros_like(param.grad.view(-1))
+        accumulated_grad = torch.zeros_like(param.grad.view(-1), device=device)
         accumulated_grad.scatter_add_(0, indices.to(torch.long), values)
         param.grad = accumulated_grad.view_as(param.grad)
 
@@ -100,14 +104,14 @@ while True:
     processed_pages = set()  # Set to store processed pages to avoid duplicates
     for miner, model_hash, page, gradient in yield_gradients():
         if page in processed_pages: continue # Skipping already processed pages
-        accumulate_gradient( model, gradient )  # Accumulating the gradients
+        accumulate_gradient(model, gradient)  # Accumulating the gradients
         pbar.update(1)  # Updating the progress bar for each gradient accumulated
-        processed_pages.add( page )
-        if len( processed_pages ) == n_accs:
+        processed_pages.add(page)
+        if len(processed_pages) == n_accs:
             break
     pbar.close()  # Closing the progress bar after loop completion
     optimizer.step()  # Updating the model parameters using the optimizer
     global_step += 1  # Incrementing the global step counter
     if (global_step + 1) % steps_per_loss_calc == 0:
-        bt.logging.info(f"Loss: {compute_loss(model, tokenizer)}")
+        bt.logging.info(f"Loss: {compute_loss(model, tokenizer, device)}")
 
