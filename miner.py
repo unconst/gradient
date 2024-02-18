@@ -14,172 +14,65 @@
 # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
-
-import time
-import typing
+import os
+import glob
+import torch
 import random
 import argparse
-import multiprocessing
 import bittensor as bt
 from tqdm import tqdm
-
-from protocol import Gradient
-from hparams import batch_size, sequence_length, topk_percent, pages_per_proof
-from utils import get_model_and_tokenizer, topk_gradient
+from utils import topk_gradient, create_model_hash
 from data import SubsetFalconLoader
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
-class Miner:
-    def __init__(self):
-        """
-        Initializes the miner with necessary configurations and objects.
-        """
-        self.config = self.setup_config()
-        bt.logging(self.config)
-        self.wallet = bt.wallet(config=self.config)
-        self.dendrite = bt.dendrite(wallet=self.wallet)
-        self.subtensor = bt.subtensor(config=self.config)
-        self.metagraph = self.subtensor.metagraph(netuid=self.config.netuid)
+parser = argparse.ArgumentParser(description="Validator config")
+parser.add_argument("--uid", type=int, default="0", help="Miner UID")
+config = bt.config(parser)
+save_path = f'storage/grads/miner_{config.uid}'
+os.makedirs(save_path, exist_ok=True)
+bt.logging.info(f"Created/verified save path at {save_path}")
 
-    def setup_config(self):
-        """
-        Sets up and parses configuration from command line arguments.
+model_name = 'gpt2'
+tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+bt.logging.info(f"Loaded tokenizer for model {model_name}")
 
-        Returns:
-            A configuration object with all necessary parameters for running the miner.
-        """
-        parser = argparse.ArgumentParser(description="Bittensor Miner Configuration")
-        parser.add_argument("--device", type=str, default="cpu", help="Device to use for computations.")
-        parser.add_argument("--netuid", type=int, default=81, help="Netuid to mine on for Bittensor.")
-        bt.wallet.add_args(parser)
-        bt.logging.add_args(parser)
-        bt.subtensor.add_args(parser)
-        config = bt.config(parser)
-        return config
+def get_model():
+    model = GPT2LMHeadModel.from_pretrained(model_name)
+    model.load_state_dict(torch.load('storage/model.pt'))
+    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+    bt.logging.info(f"Model {model_name} loaded with state from storage/model.pt")
+    return model, tokenizer
+
+def get_model_hash():
+    with open('storage/model_hash.txt', 'r') as f:
+        model_hash = f.read()
+        bt.logging.info(f"Loaded model hash: {model_hash}")
+        return model_hash
     
-    def try_sync_metagraph(self, ttl: int):
-        """
-        Attempts to synchronize the metagraph within a given time-to-live (TTL) period.
-        Args:
-            ttl (int): The time-to-live (TTL) in seconds for the synchronization attempt.
-        """
-        def sync_metagraph(endpoint):
-            metagraph = bt.subtensor(endpoint).metagraph(self.config.netuid)
-            metagraph.save()
-        process = multiprocessing.Process(target=sync_metagraph, args=(self.subtensor.chain_endpoint,))
-        process.start()
-        process.join(timeout=ttl)
-        if process.is_alive():
-            process.terminate()
-            process.join()
-            bt.logging.error(f"Failed to sync metagraph after {ttl} seconds")
-            return
-        # Load new state.
-        self.metagraph.load()
-        
-    def run(self):
-        """
-        Main method to run the mining loop with proof creation and seal generation.
-        """
-        try:
-            bt.logging.info(self.config)
-            bt.logging.info("Configuration setup complete.")
-            bt.logging.info("Bittensor objects created.")
+def clear_grads():
+    grad_files = glob.glob(f'{save_path}/*.pt')
+    for grad_file in grad_files:
+        if not grad_file.endswith(f"{mhash}.pt"):
+            os.remove(grad_file)
 
-            # Check if the miner is registered and the subnet exists.
-            if not self.subtensor.subnet_exists(self.config.netuid):
-                raise ValueError(f"Subnet: {self.config.netuid} does not exist on network: {self.config.subtensor.network}\n")
-            if self.wallet.hotkey.ss58_address not in self.metagraph.hotkeys:
-                raise ValueError(f"Miner is not registered to subnet {self.config.netuid}. Please register first.\n")
-
-            # Get model and tokenizer
-            self.model, self.tokenizer = get_model_and_tokenizer()
-            bt.logging.info("Model and tokenizer loaded.")
-            
-            # Get model host. 
-            self.master = self.metagraph.axons[self.metagraph.S.argmax()]
-            bt.logging.info(f"Model host with the most stake: {self.master}")
-            
-            # Run the mining loop
-            global_steps, total_tokens = 0, 0
-            last_sync_time = last_step_time = time.time()
-            while True:
-                self.mine()
-                current_time = time.time()
-                tokens_mined = batch_size * sequence_length
-                total_tokens += tokens_mined
-                
-                step_duration = current_time - last_step_time
-                steps_per_second = 1 / step_duration if step_duration > 0 else 0
-                tokens_per_second = tokens_mined / step_duration if step_duration > 0 else 0
-                
-                if current_time - last_sync_time >= 600:  # Sync every 10 minutes
-                    self.try_sync_metagraph(ttl=60)
-                    last_sync_time = current_time
-                
-                global_steps += 1
-                bt.logging.success(f"Global step {global_steps}, Steps/s: {steps_per_second:.2f}, Tokens/s: {tokens_per_second:.2f}, Total tokens: {total_tokens}")
-                last_step_time = current_time
-        except Exception as e:
-            bt.logging.error(f"Error occurred: {str(e)}")
-
-    def mine(self):
-        """
-        Executes a single iteration of the mining process.
-        """
-        # Generate random pages
-        pages = [random.randint(0, SubsetFalconLoader.max_pages) for _ in range(pages_per_proof)]
-                
-        # Create batches of data to process using the SubsetFalconLoader with the given parameters
+while True:
+    model, tokenizer = get_model()
+    mhash = get_model_hash()
+    clear_grads()
+    while mhash == get_model_hash():
+        page = random.randint(0, SubsetFalconLoader.max_pages)
         batches = list(
             SubsetFalconLoader(
-                tokenizer = self.tokenizer,
-                batch_size = batch_size, 
-                sequence_length = sequence_length,
-                rows = pages
+                tokenizer=tokenizer,
+                batch_size=1, 
+                sequence_length=512,
+                rows=[page]
             )
         )
-        
-        # Move the model to the specified device (CPU or GPU)
-        self.model.to(self.config.device)
-        
-        # Reset gradients in the model to zero
-        self.model.zero_grad()
-        
-        # Process each batch of data
-        for batch in batches:
-            # Move the batch to the specified device
-            inputs = batch.to(self.config.device)
-            # Pass the inputs through the model and calculate the loss
-            outputs = self.model(inputs, labels=inputs)
-            # Normalize the loss by the number of batches
-            outputs.loss /= len(batches)
-            # Backpropagate the loss to compute gradients
-            outputs.loss.backward()
-            # Exit the loop after processing the first batch for demonstration purposes
-            break
-        
-        # Extract the top-k percent gradients from the model
-        gradient = topk_gradient( self.model, topk_percent )
-        
-        # Serialize the gradient to a bt.Tensors
-        grad_idx: typing.Dict[ str, bt.Tensor ] = {}
-        grad_vals: typing.Dict[ str, bt.Tensor ] = {}
-        for key in gradient:
-            grad_idx[key] = bt.Tensor.serialize( gradient[key][0] )
-            grad_vals[key] = bt.Tensor.serialize( gradient[key][1] )
-        synapse = Gradient(
-            pages = pages,
-            gradient_idx = grad_idx,
-            gradient_vals = grad_vals,
-        )
-        size_in_mb = synapse.get_total_size() / (1024 * 1024)
-        # Send seal to validators
-        start_time = time.time()
-        responses = self.dendrite.query(self.master, synapse, timeout = 30 )
-        process_time = time.time() - start_time
-        bt.logging.info(f"Synapse sent with size: {size_in_mb} MB in {process_time} seconds.")
-        
-if __name__ == "__main__":
-    miner = Miner()
-    miner.run()
-
+        model.zero_grad()
+        for batch in tqdm(batches):
+            model(batch, labels=batch).loss.backward()
+        gradient = topk_gradient(model, topk_percent=0.1)
+        torch.save(gradient, f'{save_path}/{page}-{mhash}.pt')
+        bt.logging.info(f"Saved top-k gradients to {save_path}/{page}-{mhash}.pt")
+    
