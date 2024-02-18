@@ -96,22 +96,25 @@ global_step = 0  # Initializing the global step counter
 n_accs = 2  # Number of accumulations before updating the model
 steps_per_loss_calc = 10  # Number of steps before calculating the loss
 while True:
-    update()  # Updating the model state
-    current_model_hash = create_model_hash(model)  # Getting the current model hash
-    # Loop to collect gradients until n_accs gradients are collected
-    pbar = tqdm(total=n_accs, desc="Accumulating Gradients")  # Initializing tqdm progress bar
-    model.zero_grad()  # Resetting gradients of the model
-    processed_pages = set()  # Set to store processed pages to avoid duplicates
-    for miner, model_hash, page, gradient in yield_gradients():
-        if page in processed_pages: continue # Skipping already processed pages
-        accumulate_gradient(model, gradient)  # Accumulating the gradients
-        pbar.update(1)  # Updating the progress bar for each gradient accumulated
-        processed_pages.add(page)
-        if len(processed_pages) == n_accs:
-            break
-    pbar.close()  # Closing the progress bar after loop completion
-    optimizer.step()  # Updating the model parameters using the optimizer
-    global_step += 1  # Incrementing the global step counter
-    if (global_step + 1) % steps_per_loss_calc == 0:
-        bt.logging.info(f"Loss: {compute_loss(model, tokenizer, device)}")
+    try:
+        update()  # Updating the model state
+        current_model_hash = create_model_hash(model)  # Getting the current model hash
+        # Loop to collect gradients until n_accs gradients are collected
+        pbar = tqdm(total=n_accs, desc="Accumulating Gradients")  # Initializing tqdm progress bar
+        model.zero_grad()  # Resetting gradients of the model
+        processed_pages = set()  # Set to store processed pages to avoid duplicates
+        for miner, model_hash, page, gradient in yield_gradients():
+            if page in processed_pages: continue # Skipping already processed pages
+            accumulate_gradient(model, gradient)  # Accumulating the gradients
+            pbar.update(1)  # Updating the progress bar for each gradient accumulated
+            processed_pages.add(page)
+            if len(processed_pages) == n_accs:
+                break
+        pbar.close()  # Closing the progress bar after loop completion
+        optimizer.step()  # Updating the model parameters using the optimizer
+        global_step += 1  # Incrementing the global step counter
+        if (global_step + 1) % steps_per_loss_calc == 0:
+            bt.logging.info(f"Loss: {compute_loss(model, tokenizer, device)}")
+    except Exception as e:
+        bt.logging.error(f"Error: {e}")
 
