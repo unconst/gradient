@@ -51,30 +51,41 @@ def get_model_hash():
         bt.logging.debug(f"Loaded model hash: {model_hash}")
         return model_hash
     
-def clear_grads():
+def clear_grads( hh ):
     grad_files = glob.glob(f'{save_path}/*.pt')
     for grad_file in grad_files:
-        if not grad_file.endswith(f"{mhash}.pt"):
+        if not grad_file.endswith(f"{hh}.pt"):
             os.remove(grad_file)
 
+hash_buffer = []
 while True:
-    model, tokenizer = get_model()
-    mhash = get_model_hash()
-    clear_grads()
-    while mhash == get_model_hash():
-        page = random.randint(0, SubsetFalconLoader.max_pages)
-        batches = list(
-            SubsetFalconLoader(
-                tokenizer=tokenizer,
-                batch_size=1, 
-                sequence_length=512,
-                rows=[page]
+    try:
+        model, tokenizer = get_model()
+        mhash = get_model_hash()
+        hash_buffer.append( mhash )
+
+        # Clear hashes out of buffer
+        if len(hash_buffer) > 10:
+            bt.logging.info(f'clearning grads with hash: {hash_buffer[0]}')
+            clear_grads( hash_buffer[0] )
+            hash_buffer = hash_buffer[1:]
+
+        while mhash == get_model_hash():
+            page = random.randint(0, SubsetFalconLoader.max_pages)
+            batches = list(
+                SubsetFalconLoader(
+                    tokenizer=tokenizer,
+                    batch_size=1, 
+                    sequence_length=512,
+                    rows=[page]
+                )
             )
-        )
-        model.zero_grad()
-        for batch in tqdm(batches):
-            batch = batch.to(device)
-            model(batch, labels=batch).loss.backward()
-        gradient = topk_gradient(model, topk_percent=0.1)
-        torch.save(gradient, f'{save_path}/{page}-{mhash}.pt')
-        bt.logging.info(f"Saved top-k gradients to {save_path}/{page}-{mhash}.pt")
+            model.zero_grad()
+            for batch in batches:
+                batch = batch.to(device)
+                model(batch, labels=batch).loss.backward()
+            gradient = topk_gradient(model, topk_percent=0.1)
+            torch.save(gradient, f'{save_path}/{page}-{mhash}.pt')
+            bt.logging.info(f"+ page: {page} hash: {mhash}.pt")
+    except Exception as e:
+        bt.logging.warning(f'Error during train step: {e}')
