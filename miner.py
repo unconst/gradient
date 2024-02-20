@@ -36,19 +36,19 @@ bt.logging.info(f"Created/verified save path at {save_path}")
 
 model_name = 'gpt2'
 tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-bt.logging.info(f"Loaded tokenizer for model {model_name}")
+bt.logging.debug(f"Loaded tokenizer for model {model_name}")
 
 def get_model():
     model = GPT2LMHeadModel.from_pretrained(model_name).to(device)
     model.load_state_dict(torch.load('storage/model.pt', map_location=device))
     tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-    bt.logging.info(f"Model {model_name} loaded with state from storage/model.pt and moved to {config.device}")
+    bt.logging.debug(f"Model {model_name} loaded with state from storage/model.pt and moved to {config.device}")
     return model, tokenizer
 
 def get_model_hash():
     with open('storage/model_hash.txt', 'r') as f:
         model_hash = f.read()
-        bt.logging.info(f"Loaded model hash: {model_hash}")
+        bt.logging.debug(f"Loaded model hash: {model_hash}")
         return model_hash
     
 def clear_grads():
