@@ -17,66 +17,68 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE S
 DEALINGS IN THE SOFTWARE.
 """
 
-import os
 import copy
 import torch
 import random
 import argparse
 import bittensor as bt
-from utils import load_model, save_delta
-from data import SubsetFalconLoader
-from transformers import GPT2Tokenizer, GPT2LMHeadModel
+from tqdm import tqdm
+from utils import calculate_delta, pull_master, master_hash, model_hash, push_delta
+from data import get_random_batches
 
 # Main function.
 def main( config ):
     
-    # Load the model
-    model, tokenizer = load_model()
-    original_model = copy.deepcopy( model ).cpu()  # Keep a copy of the original model state for delta calculation
-    model.to( config.device )
-
-    # Training loop forever.
-    epoch = 0
+    master = pull_master()
+    if master == None:
+        raise ValueError('No master found.')
+    model = copy.deepcopy( master )
+    
+    # Training loop forever.   
     while True:
-        try:
-            page = random.randint(0, SubsetFalconLoader.max_pages)
-            batches = list(
-                SubsetFalconLoader(
-                    tokenizer=tokenizer,
-                    batch_size=1,
-                    sequence_length=512,
-                    rows=[page]
-                )
-            )
-        except Exception as e:
-            bt.logging.warning(f"Failed to load batches: {e}")
-            continue
         
+        # If the master model has changed, pull the latest.
+        if master_hash() != model_hash( master ):
+            master = pull_master()
+            model = copy.deepcopy( master.cpu() )
+            bt.logging.success(f"Loaded new master.")
+
+        # Load dataset.
+        batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
+        
+        # Train model for epoch.
         model.train()
+        model.to(config.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-6)
         total_loss = 0.0
-        for batch in batches:
-            optimizer.zero_grad()
+        steps = 0
+        for batch in tqdm(batches):
             inputs = batch.to(config.device)
             outputs = model(inputs, labels=inputs)
             loss = outputs.loss
             total_loss += loss.item()
             loss.backward()
-            optimizer.step()
+            # Gradient accumulation.
+            if steps % config.batches_per_step == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+            steps += 1
         average_loss = total_loss / len(batches)
         bt.logging.success(f"Loss: {average_loss}")
             
-        # Save a delta every 2 epochs
-        if epoch % 2 == 0: 
-            save_delta( model, original_model, config.uid )
-            bt.logging.success(f"Saved delta.")
-
-        epoch += 1
+        # Save delta.
+        delta = calculate_delta( model.cpu(), master.cpu() )
+        push_delta( config.uid, delta )
+        bt.logging.success(f"Pushed delta.")
             
 # Entry point.
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a model and save deltas.")
     parser.add_argument("--uid", required=False, type=int, help="Unique identifier for the delta.")
+    parser.add_argument("--bs", default=1, type=int, help="Batch size.")
+    parser.add_argument("--sl", default=512, type=int, help="Sequence length")
+    parser.add_argument("--batches_per_step", default=1, type=int, help="Number of steps before applying a gradient step.")
+    parser.add_argument("--pages_per_epoch", default=3, type=int, help="Training pages per epoch.")
     parser.add_argument("--device", type=str, default="cpu", help="Device to use for computations.")
     bt.logging.add_args( parser )
     config = bt.config( parser )

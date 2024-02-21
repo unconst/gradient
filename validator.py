@@ -16,13 +16,12 @@ THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABI
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
-import os
-import torch
 import random
 import argparse
 import bittensor as bt
-from utils import load_model, compute_loss, load_delta, add_delta, remove_delta
-from data import SubsetFalconLoader
+from tqdm import tqdm
+from utils import pull_master, compute_losses, add_delta, remove_delta, pull_delta, get_delta_info
+from data import get_random_batches
 
 def main(config):
     """
@@ -31,50 +30,38 @@ def main(config):
     Args:
         config: Configuration object containing device and other settings.
     """
-    # Number of deltas to evaluate
-    n = 3
     # Weight for the exponential moving average
     alpha = 0.01
     # Initialize scores dictionary
-    scores = {i: 0 for i in range(n)}
-    
-    bt.logging.info("Starting the validation loop.")
-    
+    scores = {i: 0 for i in range(len(get_delta_info().keys()))}
+        
     while True:
         try:
             # Load the model and tokenizer
-            model, tokenizer = load_model()
+            model = pull_master()
             model.to(config.device)
             model.eval()
 
-            if model is None or tokenizer is None:
-                bt.logging.error("Model or tokenizer could not be loaded. Exiting.")
-                break
-
             # Load a random set of batches
-            try:
-                page = random.randint(0, SubsetFalconLoader.max_pages)
-                batches = list(SubsetFalconLoader(tokenizer=tokenizer, batch_size=1, sequence_length=512, rows=[page]))
-                bt.logging.debug(f"Loaded batches from page {page}.")
-            except Exception as e:
-                bt.logging.error(f"Failed to load batches: {e}")
-                continue
+            batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
 
             # Compute the base score for comparison
-            base_score = compute_loss(model, batches, device=config.device)
-            bt.logging.trace(f"Base score computed: {base_score}")
-
-            # Evaluate all the deltas
-            for uid in range(n):
-                delta = load_delta(uid)
-                if delta is not None:
+            base_score = compute_losses(model, batches, device=config.device)
+            for uid in get_delta_info().keys():
+                try:
+                    
+                    delta = pull_delta( uid )
+                    if delta is None: continue
+                    
                     add_delta(model, delta)
-                    score_i = base_score - compute_loss(model, batches, device=config.device)
+                    delta_loss = compute_losses(model, batches, device=config.device)
+                    score_i = base_score - delta_loss
                     scores[uid] = alpha * score_i + (1 - alpha) * scores[uid]
                     remove_delta(model, delta)
-                    bt.logging.debug(f"Updated score for uid {uid}: {scores[uid]}")
-                else:
-                    bt.logging.debug(f"No delta found for uid: {uid}")
+                    bt.logging.info(f'uid: {uid}, base_loss: {base_score}, delta_loss: {delta_loss} score_i: {score_i}, scores[uid]: {scores[uid]}')   
+                except Exception as e:
+                    bt.logging.info(f'uid: {uid}, failed.')   
+                    continue
 
             bt.logging.success(f"Scores updated: {scores}")
         except Exception as e:
@@ -85,6 +72,9 @@ if __name__ == "__main__":
     # Parse command line arguments for configuration
     parser = argparse.ArgumentParser(description="Validator config")
     parser.add_argument("--device", type=str, default="cpu", help="Device to use for computations.")
+    parser.add_argument("--bs", default=1, type=int, help="Batch size.")
+    parser.add_argument("--sl", default=512, type=int, help="Sequence length")
+    parser.add_argument("--pages_per_epoch", default=3, type=int, help="Training pages per epoch.")
     bt.logging.add_args(parser)
     
     # Load the configuration

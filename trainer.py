@@ -18,77 +18,63 @@ DEALINGS IN THE SOFTWARE.
 """
 import random
 import argparse
+import traceback
 import bittensor as bt
-from utils import load_model, save_model, compute_loss, load_delta, add_delta
-from data import SubsetFalconLoader
+from utils import compute_losses, get_delta_info, add_delta, remove_delta, push_master, pull_delta
+from data import get_random_batches
+from transformers import GPT2LMHeadModel
 
 def main(config):
-    """
-    Main training loop.
-    
-    Args:
-        config: Configuration object containing device and other settings.
-    """
-    bt.logging.info("Starting the main training loop.")
-    # Number of uid's to pull deltas from
-    n_uids = 3
-    bt.logging.debug(f"Number of UIDs to pull deltas from: {n_uids}")
     # Threshold for improvement to save the model
-    improvement_threshold = 0.99
-    bt.logging.debug(f"Improvement threshold set at: {improvement_threshold}")
-    
+    improvement_threshold = 0.999  
+    model = GPT2LMHeadModel.from_pretrained('gpt2')
+    push_master( model )
+    model.to( config.device )
     while True:
         try:
-            bt.logging.info("Attempting to load model and tokenizer.")
-            # Load the model and tokenizer
-            model, tokenizer = load_model()
-            model.to(config.device)
-            if model is None or tokenizer is None:
-                bt.logging.warning("Model or tokenizer could not be loaded. Exiting loop.")
-                raise ValueError("Model or tokenizer could not be loaded.")
-            bt.logging.success("Model and tokenizer successfully loaded.")
-            
-            # Generate a list of random pages to fetch data from
-            pages = [random.randint(0, SubsetFalconLoader.max_pages) for _ in range(10)]
-            bt.logging.debug(f"Random pages selected for data fetching: {pages}")
-            # Load batches of data from the selected pages
-            batches = list(SubsetFalconLoader(tokenizer=tokenizer, batch_size=1, sequence_length=512, rows=pages))
-            bt.logging.debug("Data batches successfully loaded.")
+            # Load a random set of batches
+            batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
             
             # Compute the base loss for comparison
-            base_score = compute_loss(model, batches, device=config.device)
+            base_score = compute_losses(model, batches, device=config.device)
             bt.logging.debug(f"Base score computed for comparison: {base_score}")
             
-            for uid in range(n_uids):
-                bt.logging.debug(f"Loading delta for UID: {uid}")
-                # Load the delta for the current iteration
-                delta = load_delta(uid)
-                if delta is None:
-                    bt.logging.debug(f"No delta found for UID: {uid}. Skipping.")
+            # Load the deltas and compute the loss dif
+            for uid in get_delta_info().keys():
+                try:
+                    # Load the delta
+                    delta = pull_delta( uid )
+                    if delta is None: continue
+                    
+                    # Compute the loss after applying the delta
+                    add_delta( model, delta )
+                    loss = compute_losses(model, batches, device=config.device)
+                    remove_delta( model, delta )
+                    bt.logging.info(f"Loss {uid}: {loss}, {base_score * improvement_threshold}")
+                    
+                    # If the loss has improved significantly, save the model
+                    if loss < base_score * improvement_threshold:
+                        add_delta( model, delta )
+                        push_master( model )
+                        bt.logging.success("Model updated")
+                    else:
+                        bt.logging.success(f"{loss}, {base_score}, {base_score * improvement_threshold} {loss < base_score * improvement_threshold}")
+
+                        
+                except Exception as e:
                     continue
                 
-                bt.logging.debug(f"Applying delta for UID: {uid}")
-                # Apply the delta to the model
-                add_delta(model, delta)
-                
-                # Compute the loss after applying the delta
-                loss = compute_loss(model, batches, device=config.device)
-                bt.logging.info(f"Loss {uid}: {loss}")
-                
-                # If the loss has improved significantly, save the model
-                if loss < base_score * improvement_threshold:
-                    bt.logging.debug(f"Significant improvement detected for UID {uid}. Saving model.")
-                    save_model(model)
-                    bt.logging.success("Model updated")
-                    
         except Exception as e:
-            bt.logging.error(f"An error occurred during training: \n{e}")
+            bt.logging.error(f"An error occurred during training: \n{e}\n{traceback.format_exc()}")
             continue
         
 if __name__ == "__main__":
     # Parse command line arguments for configuration
     parser = argparse.ArgumentParser(description="Train a model and save deltas.")
     parser.add_argument("--device", type=str, default="cpu", help="Device to use for computations.")
+    parser.add_argument("--bs", default=1, type=int, help="Batch size.")
+    parser.add_argument("--sl", default=512, type=int, help="Sequence length")
+    parser.add_argument("--pages_per_epoch", default=3, type=int, help="Training pages per epoch.")
     bt.logging.add_args(parser)
     
     # Load the configuration
