@@ -1,3 +1,4 @@
 storage/
 *.pyc
 __pycache__/
+legacy/

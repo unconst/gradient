@@ -14,84 +14,15 @@
 # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
+import os
+import time
 import torch
 import typing
 import hashlib
+import bittensor as bt
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
-def accumulate_gradient(model, grads):
-    """
-    Accumulates multiple gradient proofs onto a model's gradients.
-
-    Args:
-        model (torch.nn.Module): The model to update.
-        grad (List[Dict[str, Tuple[torch.Tensor, torch.Tensor]]]): The grad to accumulate.
-
-    """
-    # Iterate through each parameter in the model
-    for name, param in model.named_parameters():
-        # Check if the parameter requires gradients and has not been processed yet
-        if not param.requires_grad: continue
-        if param.grad is None: param.grad = torch.zeros_like(param.data)
-        
-        # Initialize a tensor to accumulate gradients and a counter for averaging
-        accumulated_grad = torch.zeros_like(param.grad.view(-1))
-        grad_count = 0
-        
-        # Iterate through each proof
-        for g in grads:
-            # Check if the current parameter is present in the proof
-            if name not in g: continue
-            # Retrieve the indices and values from the proof
-            indices, values = g[name]
-            
-            # Accumulate the values from the proof to the corresponding indices in the gradient tensor
-            accumulated_grad.scatter_add_(0, indices.to(torch.long), values)
-            grad_count += 1
-        
-        # Average the accumulated gradients if there are any gradients to average
-        if grad_count > 0:
-            averaged_grad = accumulated_grad / grad_count
-        else:
-            averaged_grad = accumulated_grad
-        
-        # Reshape the averaged gradient tensor back to its original shape and assign it to param.grad
-        param.grad = averaged_grad.view_as(param.grad)
-
-def topk_gradient(model: torch.nn.Module, topk_percent: float) -> typing.Dict[str, typing.Tuple[torch.Tensor, torch.Tensor]]:
-    """
-    Extracts the top-k percent gradients of a model's parameters.
-
-    Args:
-        model (torch.nn.Module): The model from which to extract gradients.
-        topk_percent (float): The percentage of top gradients to extract.
-
-    Returns:
-        Dict[str, Tuple[torch.Tensor, torch.Tensor]]: A dictionary mapping parameter names to tuples of indices and values of top-k gradients.
-    """
-    # Initialize an empty dictionary to store gradient data
-    gradient_data = {}
-    # Iterate through each parameter in the model
-    for name, parameter in model.named_parameters():
-        # Check if the parameter has gradients
-        if parameter.grad is not None:
-            # Calculate the total number of elements in the gradient
-            total_elements = parameter.grad.numel()
-            # Calculate the number of elements to consider as top-k based on the given percentage
-            topk_elements = int(total_elements * topk_percent)
-            
-            # Extract the top-k values and their indices from the flattened gradient tensor
-            values, indices = torch.topk(parameter.grad.abs().flatten(), topk_elements)
-            
-            # Convert indices and values to the desired data type
-            indices = indices.to(torch.int32)
-            values = values.to(torch.float32)
-            
-            # Store the indices and values in the gradient_data dictionary with the parameter name as the key
-            gradient_data[name] = (indices, values)
-    # Return the dictionary containing the top-k gradient data
-    return gradient_data
-
-def create_model_hash(model: torch.nn.Module ):
+def create_model_hash( model: torch.nn.Module ):
     """
     Generates a SHA-256 hash of the model's state dictionary by iterating through the values of each item.
 
@@ -109,3 +40,107 @@ def create_model_hash(model: torch.nn.Module ):
     concatenated_model_states_bytes = concatenated_model_states.encode()
     # Generate a SHA-256 hash from the concatenated bytes
     return hashlib.sha256(concatenated_model_states_bytes).hexdigest()
+
+def save_model(model: torch.nn.Module):
+    """
+    Saves the current state of the model to disk and logs the time taken to do so.
+
+    This function performs two main tasks:
+    1. It saves the state dictionary of the model to a file named 'model.pt' in the 'storage' directory.
+    2. It generates a hash for the current state of the model using the `create_model_hash` function,
+    and saves this hash to a file named 'model_hash.txt' in the same directory.
+
+    Args:
+        model (torch.nn.Module): The model whose state is to be saved.
+    """
+    # Record the start time to calculate the duration of the save operation.
+    start_time = time.time()
+    
+    # Save the model's state dictionary to 'storage/model.pt'.
+    torch.save(model.state_dict(), 'storage/model.pt')
+    
+    # Generate a hash for the current model state.
+    model_hash = create_model_hash(model)
+    
+    # Save the generated hash to 'storage/model_hash.txt'.
+    with open('storage/model_hash.txt', 'w') as f:
+        f.write(model_hash)
+    
+    # Log the duration of the save operation.
+    bt.logging.trace(f'Updated model in {time.time() - start_time}s')
+    
+
+def load_model() -> torch.nn.Module:
+    """
+    Loads the GPT2 model and tokenizer from a pre-specified model name.
+    Returns the model and tokenizer if successful, logs and returns None otherwise.
+    """
+    model_name = 'gpt2'
+    try:
+        model = GPT2LMHeadModel.from_pretrained(model_name)
+        if os.path.exists('storage/model.pt'):
+            model.load_state_dict(torch.load('storage/model.pt'))
+        tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+        bt.logging.debug(f"Model {model_name} loaded with state from storage/model.pt")
+        return model, tokenizer
+    except Exception as e:
+        bt.logging.warning(f'Error while loading model: {e}')
+        return None, None
+
+def load_delta(uid: int) -> torch.nn.Module:
+    """
+    Attempts to load a delta tensor for a given user ID (uid).
+    Returns the delta tensor if successful, logs and returns None otherwise.
+    """
+    try:
+        delta_path = f'storage/{uid}/delta.pt'
+        delta = torch.load(delta_path, map_location=torch.device('cpu'))
+        return delta
+    except Exception as e:
+        bt.logging.trace(f'Failed to load delta for uid: {uid}, Error: {e}')
+        return None
+    
+def save_delta( model: torch.nn.Module, original_model: torch.nn.Module, uid: int ):
+    """
+    Saves the delta between the current model state and the original model state.
+    
+    Args:
+        model: The current state of the model.
+        original_model: The original state of the model before training.
+        uid: Unique identifier for the delta.
+    """
+    delta = {name: model.state_dict()[name].cpu() - original_model.state_dict()[name].cpu() for name in model.state_dict()}
+    delta_path = f"storage/{uid}/delta.pt"
+    os.makedirs(os.path.dirname(delta_path), exist_ok=True)
+    torch.save(delta, delta_path)
+    
+def add_delta(model: torch.nn.Module, delta: torch.Tensor):
+    """
+    Applies a delta to the model parameters by subtracting it.
+    Assumes the delta is already scaled by the learning rate.
+    """
+    for name, param in model.named_parameters():
+        if name in delta:
+            param.data += delta[name].to(model.device)
+
+def remove_delta(model: torch.nn.Module, delta: torch.Tensor):
+    """
+    Reverts the changes made by add_delta by adding the delta back to the model parameters.
+    """
+    for name, param in model.named_parameters():
+        if name in delta:
+            param.data -= delta[name].to(model.device)
+
+def compute_loss(model: torch.nn.Module, batches, device='cpu') -> float:
+    """
+    Evaluates the model on a set of batches and returns the average loss.
+    """
+    with torch.no_grad():  # No need to calculate gradients
+        total_loss = 0.0
+        num_batches = len(batches)
+        for batch in batches:
+            inputs = batch.to(device)
+            outputs = model(inputs, labels=inputs)
+            total_loss += outputs.loss.item()
+        average_loss = total_loss / num_batches
+        return average_loss
