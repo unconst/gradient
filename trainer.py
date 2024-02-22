@@ -50,7 +50,7 @@ def main(config):
                     add_delta( model, delta )
                     loss = compute_losses(model, batches, device=config.device)
                     remove_delta( model, delta )
-                    bt.logging.info(f"Loss {uid}: {loss}, {base_score * improvement_threshold}")
+                    bt.logging.info(f"Loss {uid}: {loss}, {loss - base_score}")
                     
                     # If the loss has improved significantly, save the model
                     if loss < base_score * improvement_threshold:
