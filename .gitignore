@@ -1,4 +1,4 @@
-storage/
+cache/
 *.pyc
 __pycache__/
 legacy/

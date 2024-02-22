@@ -31,7 +31,7 @@ from transformers import GPT2Tokenizer, GPT2LMHeadModel
 # Define the name of the S3 bucket where the model and its hash will be stored.
 MASTER = 8008135
 model_name: str = 'gpt2'
-storage_location: str = './storage'
+storage_location: str = './cache'
 bucket_name: str = 'turingbucket123'
 
 def hash_model(module: torch.nn.Module) -> str:
@@ -75,8 +75,8 @@ def client():
         s3client: boto3.client = boto3.client(
             's3',
             region_name='us-east-1',
-            aws_access_key_id='AKIA3TN4TF2QQ4KC4CBA',
-            aws_secret_access_key='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'
+            aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY')
         )
         return s3client
     except Exception as e:

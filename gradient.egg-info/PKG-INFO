@@ -1,0 +1,45 @@
+Metadata-Version: 2.1
+Name: gradient
+Version: 0.0.0
+Summary: A ML AI project on Bittensor
+Home-page: https://github.com/YumaRao/gradient
+Author: Yuma Rao
+Author-email: example@example.com
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+
+## Setting Up an S3 Bucket on AWS
+
+Before running a miner or validator, you need to set up an S3 bucket on AWS and configure your environment to use AWS credentials. Follow these steps to get started:
+
+### Step 1: Create an AWS Account
+If you don't already have an AWS account, go to the AWS homepage and sign up.
+
+### Step 2: Create an S3 Bucket
+1. Log in to the AWS Management Console and open the Amazon S3 console at https://console.aws.amazon.com/s3/.
+2. Click **Create bucket**.
+3. Provide a unique name for your bucket and select the AWS Region where you want the bucket to reside.
+4. Follow the on-screen instructions to configure options and set permissions. For most use cases, the default settings will suffice.
+5. Click **Create bucket** to finalize.
+
+### Step 3: Obtain AWS Access Credentials
+1. Navigate to the IAM console at https://console.aws.amazon.com/iam/.
+2. In the navigation pane, choose **Users**, then **Add user**.
+3. Enter a user name, select **Programmatic access** for the AWS access type, and click **Next: Permissions**.
+4. Choose **Attach existing policies directly** and select the **AmazonS3FullAccess** policy.
+5. Follow the rest of the on-screen instructions to create the user. After the user is created, you'll be provided with an **Access key ID** and a **Secret access key**. Make a note of these credentials.
+
+### Step 4: Configure Your Environment
+Open a terminal and run the following commands to add your AWS credentials to your `~/.bash_profile`. Replace `YOUR_ACCESS_KEY_ID` and `YOUR_SECRET_ACCESS_KEY` with the credentials obtained in the previous step.
+```bash
+echo "export AWS_ACCESS_KEY_ID='AKIA3TN4TF2QQ4KC4CBA'" >> ~/.bash_profile
+echo "export AWS_SECRET_ACCESS_KEY='a/VLFo0RIlS6WSn2BoLffsRW1frmwm5AyoFcQj2e'" >> ~/.bash_profile
+`
