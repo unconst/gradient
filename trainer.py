@@ -20,7 +20,7 @@ import random
 import argparse
 import traceback
 import bittensor as bt
-from utils import compute_losses, get_delta_info, add_delta, remove_delta, push_master, pull_delta
+from utils import * 
 from data import get_random_batches
 from transformers import GPT2LMHeadModel
 
@@ -43,7 +43,7 @@ def main(config):
             for uid in get_delta_info().keys():
                 try:
                     # Load the delta
-                    delta = pull_delta( uid )
+                    delta = pull_model( uid )
                     if delta is None: continue
                     
                     # Compute the loss after applying the delta
@@ -58,9 +58,8 @@ def main(config):
                         push_master( model )
                         bt.logging.success("Model updated")
                     else:
-                        bt.logging.success(f"{loss}, {base_score}, {base_score * improvement_threshold} {loss < base_score * improvement_threshold}")
+                        bt.logging.success(f"{uid} - {loss}, {base_score}, {base_score * improvement_threshold} {loss < base_score * improvement_threshold}")
 
-                        
                 except Exception as e:
                     continue
                 

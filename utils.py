@@ -23,6 +23,7 @@ import typing
 import hashlib
 import tempfile
 import bittensor as bt
+from types import SimpleNamespace
 from typing import Optional, Dict, Tuple, List
 from botocore.exceptions import BotoCoreError, ClientError
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
@@ -33,7 +34,7 @@ model_name: str = 'gpt2'
 storage_location: str = './storage'
 bucket_name: str = 'turingbucket123'
 
-def _create_module_hash(module: torch.nn.Module) -> str:
+def hash_model(module: torch.nn.Module) -> str:
     """
     Generates a SHA-256 hash of the model's state dictionary.
 
@@ -62,7 +63,7 @@ def _create_module_hash(module: torch.nn.Module) -> str:
         bt.logging.error(f"Failed to create model hash: {e}")
         return ""
     
-def _client():
+def client():
     """
     Creates and returns an S3 client configured with the specified region and credentials.
     
@@ -71,106 +72,103 @@ def _client():
     """
     try:
         # Create an S3 client with specific AWS region and credentials.
-        s3_client: boto3.client = boto3.client(
+        s3client: boto3.client = boto3.client(
             's3',
             region_name='us-east-1',
             aws_access_key_id='AKIA3TN4TF2QQ4KC4CBA',
             aws_secret_access_key='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'
         )
-        return s3_client
+        return s3client
     except Exception as e:
         bt.logging.error(f"Failed to create S3 client: {e}")
         return None
 
-def _local_module_path(uid: int) -> str: 
+def model_file_path(uid: int) -> str: 
     return f'{storage_location}/{uid}/model.txt'
 
-def _local_hash_path(uid: int) -> str: 
+def hash_file_path(uid: int) -> str: 
     return f'{storage_location}/{uid}/hash.txt'
 
-def _load_local_hash(uid: int) -> str:
+def load_hash(uid: int) -> str:
     try:
-        with open( _local_hash_path( uid ), 'r') as file:
+        with open( hash_file_path( uid ), 'r') as file:
             return file.read()
     except:
         return None
     
-def _load_local_module(uid: int) -> torch.nn.Module:
-    model_path = _local_module_path(uid)
-    if not os.path.exists(model_path):
-        bt.logging.error(f"Model file does not exist at {model_path}")
+def load_model(uid: int) -> torch.nn.Module:
+    if not os.path.exists(model_file_path(uid)):
+        bt.logging.error(f"Model file does not exist at {model_file_path(uid)}")
         return None
     try:
-        model = torch.load(model_path, map_location=torch.device('cpu'))
-        bt.logging.debug(f"Model loaded successfully from {model_path}")
+        model = torch.load(model_file_path(uid), map_location=torch.device('cpu'))
+        bt.logging.debug(f"Model loaded successfully from {model_file_path(uid)}")
         return model
     except Exception as e:
         bt.logging.error(f"Failed to load model: {e}")
         return None
     
-def _load_remote_hash( uid: int ) -> Optional[str]:
+def download_hash( uid: int ) -> Optional[str]:
     start_time = time.time()
     try:
-        s3_client: boto3.client = _client()  # Create an S3 client
+        s3client: boto3.client = client()  # Create an S3 client
         object_key: str = f'hash_{uid}.txt'
         with tempfile.TemporaryFile() as temp_file:
-            s3_client.download_fileobj(bucket_name, object_key, temp_file)
+            s3client.download_fileobj(bucket_name, object_key, temp_file)
             temp_file.seek(0)  # Go to the start of the file
             module_hash: str = temp_file.read().decode('utf-8')  # Read and decode the hash
         bt.logging.debug(f"Model hash {module_hash} successfully loaded from S3 in {time.time() - start_time}s")
         return module_hash
     except Exception as e:
-        bt.logging.error(f"Failed to load model hash from S3: {e}")
+        bt.logging.trace(f"Failed to load model hash from S3: {e}")
         return None
     
-def _load_remote_module( uid: int ) -> torch.nn.Module:
+def download_model( uid: int ) -> torch.nn.Module:
     start_time = time.time()
     model_name: str = 'gpt2'
     try:
         # Initialize S3 client to interact with the bucket
-        s3_client: boto3.client = _client()
+        s3client: boto3.client = client()
         object_key: str = f'module_{uid}.pt'
         # Use a temporary file to store the downloaded model state
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            s3_client.download_fileobj(bucket_name, object_key, temp_file)
+            s3client.download_fileobj(bucket_name, object_key, temp_file)
             temp_file_path: str = temp_file.name
 
-        # Load the model state dictionary from the temporary file
-        model_state_dict: Dict[str, torch.Tensor] = torch.load(temp_file_path)
-        model: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(model_name)
-        model.load_state_dict(model_state_dict)
-        bt.logging.debug(f"Model {model_name} successfully loaded from S3 bucket {bucket_name} in {time.time() - start_time}s")
+            # Load the model state dictionary from the temporary file
+            model_state_dict: Dict[str, torch.Tensor] = torch.load(temp_file_path)
+            model: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(model_name)
+            model.load_state_dict(model_state_dict)
+            bt.logging.debug(f"Model {model_name} successfully loaded from S3 bucket {bucket_name} in {time.time() - start_time}s")
 
         return model
     except Exception as e:
-        bt.logging.error(f"Failed to load module {e}")
+        bt.logging.debug(f"Failed to load module {e}")
         return None
     
-def _local_save( uid: int, module: torch.nn.Module ):
-    model_path = _local_module_path(uid)
-    hash_path = _local_hash_path(uid)
+def save_model( uid: int, module: torch.nn.Module ):
     try:
         # Check if we should update the model
-        current_hash = _create_module_hash( module )
-        if _load_local_hash( uid ) != current_hash:
+        current_hash = hash_model( module )
+        if load_hash( uid ) != current_hash:
             # Ensure the directory exists
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            os.makedirs(os.path.dirname(model_file_path(uid)), exist_ok=True)
             # Save the model
-            torch.save(module, model_path)
-            bt.logging.debug(f"Model saved successfully at {model_path}")
+            torch.save(module, model_file_path(uid))
+            bt.logging.debug(f"Model saved successfully at { model_file_path(uid)}")
             # Generate and save the hash
             module_hash = current_hash
-            with open(hash_path, 'w') as file:
+            with open(hash_file_path(uid), 'w') as file:
                 file.write(module_hash)
-        bt.logging.debug(f"Model hash saved successfully at {hash_path}")
+        bt.logging.debug(f"Model hash saved successfully at {hash_file_path(uid)}")
     except Exception as e:
         bt.logging.error(f"Failed to save model and hash: {e}")
         
-def _remote_save( uid: int, module: torch.nn.Module ):
+def upload_model( uid: int, module: torch.nn.Module ):
     try:
         # Check if we should update the model
-        current_hash = _create_module_hash( module )
-        if _load_remote_hash( uid ) != current_hash:
+        current_hash = hash_model( module )
+        if download_hash( uid ) != current_hash:
             # Record the start time to calculate the duration of the save operation.
             start_time: float = time.time()
             # Serialize the model's state dictionary and save it to S3 as 'model.pt'.
@@ -178,12 +176,12 @@ def _remote_save( uid: int, module: torch.nn.Module ):
             with io.BytesIO() as module_buffer:
                 torch.save(module_state_dict, module_buffer)
                 module_buffer.seek(0)
-                _client().upload_fileobj(module_buffer, bucket_name, f'module_{uid}.pt')
+                client().upload_fileobj(module_buffer, bucket_name, f'module_{uid}.pt')
                 bt.logging.debug("Module state dictionary saved to S3.")
                     
             # Save the generated hash to S3 as 'model_hash.txt'.
             with io.BytesIO(current_hash.encode()) as hash_buffer:
-                _client().upload_fileobj(hash_buffer, bucket_name, f'hash_{uid}.txt')
+                client().upload_fileobj(hash_buffer, bucket_name, f'hash_{uid}.txt')
                 bt.logging.debug("Module hash saved to S3.")
             
             # Log the duration of the save operation.
@@ -191,48 +189,45 @@ def _remote_save( uid: int, module: torch.nn.Module ):
     except Exception as e:
         bt.logging.error(f"Failed to save module: {e}")
         
-def model_hash( model: torch.nn.Module ) -> str:
-    return _create_module_hash(model)
+def download_master_hash() -> str:
+    return download_hash( MASTER )
 
-def master_hash() -> str:
-    return _load_local_hash( MASTER )
-            
-def pull_delta( uid: int ) -> torch.nn.Module:
-    if _load_local_hash( uid ) != _load_remote_hash( uid ):
-        _local_save( uid, _load_remote_module( uid ) )
-    return _load_local_module( uid )
+def pull_model( uid: int ) -> torch.nn.Module:
+    if load_hash( uid ) != download_hash( uid ):
+        save_model( uid, download_model( uid ) )
+    return load_model( uid )
 
-def push_delta( uid: int, module: torch.nn.Module ):
-    _local_save( uid, module )
-    _remote_save( uid, module )
+def push_model( uid: int, model: torch.nn.Module ):
+    save_model( uid, model )
+    upload_model( uid, model )
     
 def pull_master() -> torch.nn.Module:
-    return pull_delta( MASTER )
+    return pull_model( MASTER )
 
 def push_master( module: torch.nn.Module ):
-    push_delta( MASTER, module )
+    push_model( MASTER, module )
 
 def get_delta_info() -> Dict[str, Dict[str, typing.Union[str, int]]]:
     try:
-        s3_client: boto3.client = _client()
-        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix='hash_')
+        s3client: boto3.client = client()
+        response = s3client.list_objects_v2(Bucket=bucket_name, Prefix='hash_')
         deltas_info: Dict[int, Dict[str, typing.Union[str, int]]] = {}
 
         for obj in response.get('Contents', []):
             uid: int = int(obj['Key'].split('_')[1].split('.')[0])  # Extract uid from the object key format "delta_{uid}.pt"
             if uid == MASTER: continue
-            remote_hash = _load_remote_hash( uid )
-            local_hash = _load_local_hash( uid )
-            deltas_info[uid] = {
-                'uid': uid,
-                'module_name': f'module_{uid}.pt',
-                'hash_name': obj['Key'],
-                'remote_timestamp': obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
-                'seconds': int(obj['LastModified'].timestamp()),
-                'remote': remote_hash,
-                'local': local_hash,
-                'stale': remote_hash != local_hash,
-            }
+            local_hash = load_hash( uid )
+            remote_hash = download_hash( uid )
+            deltas_info[uid] = SimpleNamespace(
+                uid=uid,
+                module_name=f'module_{uid}.pt',
+                hash_name=obj['Key'],
+                remote_timestamp=obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
+                seconds=int(obj['LastModified'].timestamp()),
+                remote=remote_hash,
+                local=local_hash,
+                stale=remote_hash != local_hash,
+            )
         bt.logging.debug("Successfully listed all deltas from S3.")
         return deltas_info
     except (BotoCoreError, ClientError) as e:

@@ -47,20 +47,20 @@ def main(config):
 
             # Compute the base score for comparison
             base_score = compute_losses(model, batches, device=config.device)
-            for uid in get_delta_info().keys():
+            for info in get_delta_info():
                 try:
                     
-                    delta = pull_delta( uid )
+                    delta = pull_delta( info.uid )
                     if delta is None: continue
                     
                     add_delta(model, delta)
                     delta_loss = compute_losses(model, batches, device=config.device)
                     score_i = base_score - delta_loss
-                    scores[uid] = alpha * score_i + (1 - alpha) * scores[uid]
+                    scores[info.uid] = alpha * score_i + (1 - alpha) * scores[info.uid]
                     remove_delta(model, delta)
-                    bt.logging.info(f'uid: {uid}, base_loss: {base_score}, delta_loss: {delta_loss} score_i: {score_i}, scores[uid]: {scores[uid]}')   
+                    bt.logging.info(f'uid: {info.uid}, base_loss: {base_score}, delta_loss: {delta_loss} score_i: {score_i}, scores[uid]: {scores[info.uid]}')   
                 except Exception as e:
-                    bt.logging.info(f'uid: {uid}, failed.')   
+                    bt.logging.info(f'uid: {info.uid}, failed.')   
                     continue
 
             bt.logging.success(f"Scores updated: {scores}")

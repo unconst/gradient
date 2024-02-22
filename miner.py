@@ -23,7 +23,7 @@ import random
 import argparse
 import bittensor as bt
 from tqdm import tqdm
-from utils import calculate_delta, pull_master, master_hash, model_hash, push_delta
+from utils import *
 from data import get_random_batches
 
 # Main function.
@@ -38,7 +38,7 @@ def main( config ):
     while True:
         
         # If the master model has changed, pull the latest.
-        if master_hash() != model_hash( master ):
+        if download_master_hash() != hash_model( master ):
             master = pull_master()
             model = copy.deepcopy( master.cpu() )
             bt.logging.success(f"Loaded new master.")
@@ -68,7 +68,7 @@ def main( config ):
             
         # Save delta.
         delta = calculate_delta( model.cpu(), master.cpu() )
-        push_delta( config.uid, delta )
+        push_model( config.uid, delta )
         bt.logging.success(f"Pushed delta.")
             
 # Entry point.
