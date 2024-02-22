@@ -40,7 +40,7 @@ def main(config):
             bt.logging.debug(f"Base score computed for comparison: {base_score}")
             
             # Load the deltas and compute the loss dif
-            for uid in get_delta_info().keys():
+            for uid in list_models().keys():
                 try:
                     # Load the delta
                     delta = pull_model( uid )
@@ -57,8 +57,6 @@ def main(config):
                         add_delta( model, delta )
                         push_master( model )
                         bt.logging.success("Model updated")
-                    else:
-                        bt.logging.success(f"{uid} - {loss}, {base_score}, {base_score * improvement_threshold} {loss < base_score * improvement_threshold}")
 
                 except Exception as e:
                     continue

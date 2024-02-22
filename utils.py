@@ -207,7 +207,7 @@ def pull_master() -> torch.nn.Module:
 def push_master( module: torch.nn.Module ):
     push_model( MASTER, module )
 
-def get_delta_info() -> Dict[str, Dict[str, typing.Union[str, int]]]:
+def list_models() -> Dict[int, SimpleNamespace]:
     try:
         s3client: boto3.client = client()
         response = s3client.list_objects_v2(Bucket=bucket_name, Prefix='hash_')
@@ -239,7 +239,8 @@ def add_delta(model: torch.nn.Module, delta: torch.nn.Module) -> None:
     Applies a delta to the model parameters by adding it.
 
     This function iterates over the model's parameters and adds the corresponding delta values,
-    effectively updating the model's parameters based on the delta.
+    effectively updating the model's parameters based on the delta. It ensures the model's state_dict
+    is directly updated to reflect these changes.
 
     Args:
         model (torch.nn.Module): The model to which the delta will be applied.
@@ -249,10 +250,12 @@ def add_delta(model: torch.nn.Module, delta: torch.nn.Module) -> None:
         The delta should be scaled appropriately before being passed to this function.
     """
     try:
+        model_state_dict = model.state_dict()
         delta_state_dict = delta.state_dict()
-        for name, param in model.named_parameters():
-            if name in delta_state_dict:
-                param.data += delta_state_dict[name].data.to(model.device)
+        for name, param in delta_state_dict.items():
+            if name in model_state_dict:
+                model_state_dict[name] += param.data.to(model.device)
+        model.load_state_dict(model_state_dict)
         bt.logging.debug("Delta successfully added to the model.")
     except Exception as e:
         bt.logging.error(f"Failed to add delta to the model: {e}")
@@ -296,12 +299,18 @@ def calculate_delta(model_a: torch.nn.Module, model_b: torch.nn.Module) -> torch
     Returns:
         torch.nn.Module: A new model containing the differences between model_a and model_b parameters.
     """
-    delta_model = torch.nn.Module()
-    for (name_a, param_a), (name_b, param_b) in zip(model_a.named_parameters(), model_b.named_parameters()):
-        if name_a == name_b:
-            # Ensure the parameter names match, then subtract and store the difference
-            setattr(delta_model, name_a, param_a.data - param_b.data)
-    return delta_model
+    delta_dict = {}
+    state_dict_a = model_a.state_dict()
+    state_dict_b = model_b.state_dict()
+    for name, param in state_dict_a.items():
+        if name in state_dict_b:
+            # Subtract the parameters of model_b from model_a and store it in the delta dictionary
+            delta_param = param - state_dict_b[name]
+            delta_dict[name] = delta_param    
+    import copy
+    delta = copy.deepcopy( model_a )
+    delta.load_state_dict( delta_dict )
+    return delta
     
 
 def compute_losses(model: torch.nn.Module, batches: List[torch.Tensor], device: str = 'cpu') -> float:
