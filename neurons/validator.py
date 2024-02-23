@@ -18,9 +18,7 @@ import torch
 import random
 import argparse
 import bittensor as bt
-from tqdm import tqdm
-from gradient.utils import pull_master, compute_losses, add_delta, remove_delta, pull_delta, get_delta_info
-from gradient.data import get_random_batches
+import gradient as grad
 
 def main(config):
 
@@ -32,32 +30,29 @@ def main(config):
     while True:
         try:
             # Load the model and tokenizer
-            model = pull_master()
+            model = grad.utils.pull_master()
             model.to(config.device)
             model.eval()
 
             # Load a random set of batches
-            batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
+            batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
 
             # Compute the base score for comparison
-            base_score = compute_losses(model, batches, device=config.device)
-            for info in get_delta_info():
-                try:
-                    
-                    delta = pull_delta( info.uid )
+            base_loss = grad.utils.compute_losses(model, batches, device=config.device)
+            delta_losses = torch.zeros(metagraph.n.item())
+            for uid, info in grad.utils.list_models().items():
+                try:                    
+                    delta = grad.utils.pull_model( uid )
                     if delta is None: continue
-                    
-                    add_delta(model, delta)
-                    delta_loss = compute_losses(model, batches, device=config.device)
-                    score_i = base_score - delta_loss
-                    scores[info.uid] = config.alpha * score_i + (1 - config.alpha) * scores[info.uid]
-                    remove_delta(model, delta)
-                    bt.logging.info(f'uid: {info.uid}, base_loss: {base_score}, delta_loss: {delta_loss} score_i: {score_i}, scores[uid]: {weights[info.uid]}')   
+                    grad.utils.add_delta(model, delta)
+                    delta_losses[uid] = base_loss - grad.utils.compute_losses(model, batches, device=config.device)
+                    grad.utils.remove_delta(model, delta)
                 except Exception as e:
-                    bt.logging.info(f'uid: {info.uid}, failed.')   
+                    bt.logging.trace(f'uid: { uid }, failed.')   
                     continue
-
-            bt.logging.success(f"Scores updated: {weights}")
+                
+            weights = config.alpha * torch.softmax(delta_losses, dim=0) + (1 - config.alpha) * weights
+            bt.logging.success(f"weights: {weights}")
         except Exception as e:
             bt.logging.error(f"An unexpected error occurred: {e}")
             break

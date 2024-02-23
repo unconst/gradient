@@ -193,9 +193,16 @@ def download_master_hash() -> str:
     return download_hash( MASTER )
 
 def pull_model( uid: int ) -> torch.nn.Module:
-    if load_hash( uid ) != download_hash( uid ):
-        save_model( uid, download_model( uid ) )
-    return load_model( uid )
+    loaded_hash = load_hash( uid )
+    downloaded_hash = download_hash( uid )
+    if loaded_hash != downloaded_hash:
+        downloaded_model = download_model( uid )
+        save_model( uid, downloaded_model )
+        bt.logging.debug(f'Downloaded {uid} from cache {loaded_hash} -> {downloaded_hash} ')
+        return downloaded_model
+    else:
+        bt.logging.debug(f'Loaded {uid} from cache.')
+        return load_model( uid )
 
 def push_model( uid: int, model: torch.nn.Module ):
     save_model( uid, model )

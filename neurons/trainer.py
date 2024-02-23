@@ -18,42 +18,41 @@ import random
 import argparse
 import traceback
 import bittensor as bt
-from gradient.utils import * 
-from gradient.data import get_random_batches
+import gradient as grad
 from transformers import GPT2LMHeadModel
 
 def main(config):
     # Threshold for improvement to save the model
     improvement_threshold = 0.999  
     model = GPT2LMHeadModel.from_pretrained('gpt2')
-    push_master( model )
+    grad.utils.push_master( model )
     model.to( config.device )
     while True:
         try:
             # Load a random set of batches
-            batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
+            batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
             
             # Compute the base loss for comparison
-            base_score = compute_losses(model, batches, device=config.device)
+            base_score = grad.utils.compute_losses(model, batches, device=config.device)
             bt.logging.debug(f"Base score computed for comparison: {base_score}")
             
             # Load the deltas and compute the loss dif
-            for uid in list_models().keys():
+            for uid in grad.utils.list_models().keys():
                 try:
                     # Load the delta
-                    delta = pull_model( uid )
+                    delta = grad.utils.pull_model( uid )
                     if delta is None: continue
                     
                     # Compute the loss after applying the delta
-                    add_delta( model, delta )
-                    loss = compute_losses(model, batches, device=config.device)
-                    remove_delta( model, delta )
+                    grad.utils.add_delta( model, delta )
+                    loss = grad.utils.compute_losses(model, batches, device=config.device)
+                    grad.utils.remove_delta( model, delta )
                     bt.logging.info(f"Loss {uid}: {loss}, {loss - base_score}")
                     
                     # If the loss has improved significantly, save the model
                     if loss < base_score * improvement_threshold:
-                        add_delta( model, delta )
-                        push_master( model )
+                        grad.utils.add_delta( model, delta )
+                        grad.utils.push_master( model )
                         bt.logging.success("Model updated")
 
                 except Exception as e:

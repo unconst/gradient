@@ -1,35 +1,32 @@
-"""
-The MIT License (MIT)
-Copyright © 2023 Yuma Rao
+# The MIT License (MIT)
+# Copyright © 2023 Yuma Rao
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-documentation files (the “Software”), to deal in the Software without restriction, including without limitation
-the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
-and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the “Software”), to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions
-of the Software.
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+# the Software.
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-"""
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 
 import copy
 import torch
 import random
 import argparse
 import bittensor as bt
+import gradient as grad
 from tqdm import tqdm
-from gradient.utils import *
-from gradient.data import get_random_batches
 
 # Main function.
 def main( config ):
     
-    master = pull_master()
+    master = grad.utils.pull_master()
     if master == None:
         raise ValueError('No master found.')
     model = copy.deepcopy( master )
@@ -38,13 +35,13 @@ def main( config ):
     while True:
         
         # If the master model has changed, pull the latest.
-        if download_master_hash() != hash_model( master ):
-            master = pull_master()
+        if grad.utils.download_master_hash() != grad.utils.hash_model( master ):
+            master = grad.utils.pull_master()
             model = copy.deepcopy( master.cpu() )
             bt.logging.success(f"Loaded new master.")
 
         # Load dataset.
-        batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
+        batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
         
         # Train model for epoch.
         model.train()
@@ -67,8 +64,8 @@ def main( config ):
         bt.logging.success(f"Loss: {average_loss}")
             
         # Save delta.
-        delta = calculate_delta( model, master )
-        push_model( config.uid, delta )
+        delta = grad.utils.calculate_delta( model, master )
+        grad.utils.push_model( config.uid, delta )
         bt.logging.success(f"Pushed delta.")
             
 # Entry point.
