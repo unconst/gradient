@@ -23,8 +23,8 @@ import random
 import argparse
 import bittensor as bt
 from tqdm import tqdm
-from utils import *
-from data import get_random_batches
+from gradient.utils import *
+from gradient.data import get_random_batches
 
 # Main function.
 def main( config ):
@@ -67,7 +67,7 @@ def main( config ):
         bt.logging.success(f"Loss: {average_loss}")
             
         # Save delta.
-        delta = calculate_delta( model.cpu(), master.cpu() )
+        delta = calculate_delta( model, master )
         push_model( config.uid, delta )
         bt.logging.success(f"Pushed delta.")
             
