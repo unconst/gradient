@@ -45,7 +45,7 @@ def main( config ):
         raise ValueError(f'Miner is not registered, run btcli s register --netuid {config.netuid} --wallet.name {config.wallet.name} --wallet.hotkey {config.wallet.hotkey}')
     else: 
         my_uid = metagraph.hotkeys.index( wallet.hotkey.ss58_address )
-        bt.logging.success(f'Miner is registered on uid: {uid} on netuid: {config.netuid}')
+        bt.logging.success(f'Miner is registered on uid: {my_uid} on netuid: {config.netuid}')
         
     # Commit bucket information to chain.
     commit_bucket = subtensor.get_commitment( netuid=config.netuid, uid=my_uid ) 
