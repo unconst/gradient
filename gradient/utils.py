@@ -34,7 +34,8 @@ env_config = dotenv_values(".env")
 MASTER = 8008135
 model_name: str = 'gpt2'
 storage_location: str = os.path.expanduser('~/.cache')
-bucket_name: str = 'turingbucket123'
+MASTER_BUCKET: str = 'turingbucket123'
+MASTER_UID: int = '0'
 if 'AWS_ACCESS_KEY_ID' not in env_config or 'AWS_SECRET_ACCESS_KEY' not in env_config:
     raise Exception("Please provide AWS credentials in the .env file; touch .env and add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.")
 
@@ -112,13 +113,13 @@ def load_model(uid: int) -> torch.nn.Module:
         bt.logging.error(f"Failed to load model: {e}")
         return None
     
-def download_hash( uid: int ) -> Optional[str]:
+def download_hash( bucket: str, uid: int ) -> Optional[str]:
     start_time = time.time()
     try:
         s3client: boto3.client = client()  # Create an S3 client
         object_key: str = f'hash_{uid}.txt'
         with tempfile.TemporaryFile() as temp_file:
-            s3client.download_fileobj(bucket_name, object_key, temp_file)
+            s3client.download_fileobj(bucket, object_key, temp_file)
             temp_file.seek(0)  # Go to the start of the file
             module_hash: str = temp_file.read().decode('utf-8')  # Read and decode the hash
         bt.logging.debug(f"Model hash {module_hash} successfully loaded from S3 in {time.time() - start_time}s")
@@ -127,23 +128,23 @@ def download_hash( uid: int ) -> Optional[str]:
         bt.logging.trace(f"Failed to load model hash from S3: {e}")
         return None
     
-def download_model( uid: int ) -> torch.nn.Module:
+def download_model( bucket: str, uid: int ) -> torch.nn.Module:
     start_time = time.time()
     model_name: str = 'gpt2'
     try:
         # Initialize S3 client to interact with the bucket
-        s3client: boto3.client = client()
+        s3client: boto3.client = client( )
         object_key: str = f'module_{uid}.pt'
         # Use a temporary file to store the downloaded model state
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            s3client.download_fileobj(bucket_name, object_key, temp_file)
+            s3client.download_fileobj(bucket, object_key, temp_file)
             temp_file_path: str = temp_file.name
 
             # Load the model state dictionary from the temporary file
             model_state_dict: Dict[str, torch.Tensor] = torch.load(temp_file_path)
             model: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(model_name)
             model.load_state_dict(model_state_dict)
-            bt.logging.debug(f"Model {model_name} successfully loaded from S3 bucket {bucket_name} in {time.time() - start_time}s")
+            bt.logging.debug(f"Model {model_name} successfully loaded from S3 bucket {bucket} in {time.time() - start_time}s")
 
         return model
     except Exception as e:
@@ -168,11 +169,11 @@ def save_model( uid: int, module: torch.nn.Module ):
     except Exception as e:
         bt.logging.error(f"Failed to save model and hash: {e}")
         
-def upload_model( uid: int, module: torch.nn.Module ):
+def upload_model( bucket: str, uid: int, module: torch.nn.Module ):
     try:
         # Check if we should update the model
         current_hash = hash_model( module )
-        if download_hash( uid ) != current_hash:
+        if download_hash( bucket, uid ) != current_hash:
             # Record the start time to calculate the duration of the save operation.
             start_time: float = time.time()
             # Serialize the model's state dictionary and save it to S3 as 'model.pt'.
@@ -180,12 +181,12 @@ def upload_model( uid: int, module: torch.nn.Module ):
             with io.BytesIO() as module_buffer:
                 torch.save(module_state_dict, module_buffer)
                 module_buffer.seek(0)
-                client().upload_fileobj(module_buffer, bucket_name, f'module_{uid}.pt')
+                client().upload_fileobj(module_buffer, bucket, f'module_{uid}.pt')
                 bt.logging.debug("Module state dictionary saved to S3.")
                     
             # Save the generated hash to S3 as 'model_hash.txt'.
             with io.BytesIO(current_hash.encode()) as hash_buffer:
-                client().upload_fileobj(hash_buffer, bucket_name, f'hash_{uid}.txt')
+                client().upload_fileobj(hash_buffer, bucket, f'hash_{uid}.txt')
                 bt.logging.debug("Module hash saved to S3.")
             
             # Log the duration of the save operation.
@@ -194,13 +195,13 @@ def upload_model( uid: int, module: torch.nn.Module ):
         bt.logging.error(f"Failed to save module: {e}")
         
 def download_master_hash() -> str:
-    return download_hash( MASTER )
+    return download_hash( MASTER_BUCKET, MASTER_UID )
 
-def pull_model( uid: int ) -> torch.nn.Module:
+def pull_model( bucket: str, uid: int ) -> torch.nn.Module:
     loaded_hash = load_hash( uid )
-    downloaded_hash = download_hash( uid )
+    downloaded_hash = download_hash( bucket, uid )
     if loaded_hash != downloaded_hash:
-        downloaded_model = download_model( uid )
+        downloaded_model = download_model( bucket, uid )
         save_model( uid, downloaded_model )
         bt.logging.debug(f'Downloaded {uid} from cache {loaded_hash} -> {downloaded_hash} ')
         return downloaded_model
@@ -208,20 +209,20 @@ def pull_model( uid: int ) -> torch.nn.Module:
         bt.logging.debug(f'Loaded {uid} from cache.')
         return load_model( uid )
 
-def push_model( uid: int, model: torch.nn.Module ):
+def push_model( bucket: str, uid: int, model: torch.nn.Module ):
     save_model( uid, model )
-    upload_model( uid, model )
+    upload_model( bucket, uid, model )
     
 def pull_master() -> torch.nn.Module:
-    return pull_model( MASTER )
+    return pull_model( MASTER_BUCKET, MASTER_UID )
 
 def push_master( module: torch.nn.Module ):
-    push_model( MASTER, module )
+    push_model( MASTER_BUCKET, MASTER_UID, module )
 
-def list_models() -> Dict[int, SimpleNamespace]:
+def list_models( bucket: str ) -> Dict[int, SimpleNamespace]:
     try:
         s3client: boto3.client = client()
-        response = s3client.list_objects_v2(Bucket=bucket_name, Prefix='hash_')
+        response = s3client.list_objects_v2(Bucket=bucket, Prefix='hash_')
         deltas_info: Dict[int, Dict[str, typing.Union[str, int]]] = {}
 
         for obj in response.get('Contents', []):

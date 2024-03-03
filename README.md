@@ -67,7 +67,7 @@ To securely manage your AWS credentials, you will create a `.env` file in your p
    echo "AWS_SECRET_ACCESS_KEY=YOUR_SECRET_ACCESS_KEY" >> .env
    ```
 
-### How to Run a Miner
+### Running a Miner
 
 To run a miner, you will need to execute the `neurons/miner.py` script, which is responsible for the mining process. This script handles the training of the model on your local machine, calculates the delta (the difference between the newly trained model and the master model), and then pushes this delta back to the network.
 
@@ -80,7 +80,7 @@ Here are the steps to run a miner:
 4. The miner will start training the model locally. Progress will be shown in the terminal, including the loss after each epoch and a success message when a delta is pushed successfully.
 5. To stop the miner, simply interrupt the process in your terminal (e.g., by pressing `Ctrl+C`).
 
-### How to Run a Validator
+### Running a Validator
 
 Running a validator involves evaluating the deltas (changes) made by miners to the model and scoring them based on their impact on the model's performance. Validators play a crucial role in ensuring the quality and integrity of updates to the model. Follow the steps below to run a validator:
 

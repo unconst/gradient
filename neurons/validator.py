@@ -24,13 +24,20 @@ import gradient as grad
 def main(config):
 
     wallet = bt.wallet(config=config)
+    bt.logging.success(f"Using wallet: {wallet}")
+    
     subtensor = bt.subtensor(network = 'test')
+    bt.logging.success(f"Using subtensor: {subtensor}")
+    
     metagraph = subtensor.metagraph( config.netuid )
+    bt.logging.success(f"Using subnet: {metagraph}")
+    
     weights = torch.zeros(metagraph.n.item())   
+    bt.logging.success(f"Initial weights: {weights}")
     
     # Check wallet registration.
     if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        raise ValueError(f'Validator is not registered, run btcli s register --netuid {config.netuid}')
+        raise ValueError(f'Validator is not registered, run btcli s register --netuid {config.netuid} --wallet.name {config.wallet.name} --wallet.hotkey {config.wallet.hotkey}')
     else: 
         my_uid = metagraph.hotkeys.index( wallet.hotkey.ss58_address )
         bt.logging.success(f'Validator is registered on uid: {my_uid} on netuid: {config.netuid}')
@@ -38,25 +45,45 @@ def main(config):
     while True:
         try:
             # Load the model and tokenizer
-            model = grad.utils.pull_master()
-            model.to(config.device)
-            model.eval()
+            master = grad.utils.pull_master()
+            master.to(config.device)
+            master.eval()
 
             # Load a random set of batches
             batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
 
             # Compute the base score for comparison
-            base_loss = grad.utils.compute_losses(model, batches, device=config.device)
+            master_loss = grad.utils.compute_losses(master, batches, device=config.device)
             delta_losses = torch.zeros(metagraph.n.item())
-            for uid, info in grad.utils.list_models().items():
-                try:                    
-                    delta = grad.utils.pull_model( uid )
-                    if delta is None: continue
-                    grad.utils.add_delta(model, delta)
-                    delta_losses[uid] = base_loss - grad.utils.compute_losses(model, batches, device=config.device)
-                    grad.utils.remove_delta(model, delta)
+            
+            for uid in metagraph.uids:
+                try:       
+                    # Get bucket name from subtensor commits.             
+                    bucket_name = subtensor.get_commitment( config.netuid, uid )
+                    if bucket_name is None: 
+                        bt.logging.trace(f'uid: { uid }, has no bucket.')
+                        continue
+                    
+                    # Get the delta from the bucket.
+                    delta = grad.utils.download_model( bucket_name, uid )
+                    if delta is None: 
+                        bt.logging.trace(f'uid: { uid }, has no delta.')
+                        continue
+                    
+                    # Apply the delta to the model
+                    grad.utils.add_delta(master, delta)
+                    
+                    # Compute the delta loss with the delta applied.
+                    delta_loss = master_loss - grad.utils.compute_losses(master, batches, device=config.device)
+                    
+                    # Save the loss.
+                    delta_losses[uid] = delta_loss
+                    
+                    # Remove the delta from our local model.
+                    grad.utils.remove_delta(master, delta)
+                    
                 except Exception as e:
-                    bt.logging.trace(f'uid: { uid }, failed.')   
+                    bt.logging.trace(f'uid: { uid }, failed with error: {e}')   
                     continue
                 
             # Weights are the softmax of the loss deltas
@@ -83,7 +110,6 @@ def main(config):
                 for uid, (ha, hb) in enumerate(list(zip( prev_hotkeys, metagraph.hotkeys ))):
                     if ha != hb: weights[uid] = 0.0
                         
-            
         except Exception as e:
             bt.logging.error(f"An unexpected error occurred: {e}")
             break

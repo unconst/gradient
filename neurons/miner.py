@@ -28,27 +28,44 @@ from tqdm import tqdm
 def main( config ):
     
     # Build Bittensor objects.
+    print (config)
     wallet = bt.wallet(config=config)
+    bt.logging.success(f"Using wallet: {wallet}")
+
+    # Connect Subtensor.
     subtensor = bt.subtensor(network = 'test')
+    bt.logging.success(f"Using subtensor: {subtensor}")
+
+    # Sync metagraph..
     metagraph = subtensor.metagraph( config.netuid )
+    bt.logging.success(f"Using subnet: {metagraph}")
 
     # Check wallet registration.
     if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        raise ValueError(f'Miner is not registered, run btcli s register --netuid {config.netuid}')
+        raise ValueError(f'Miner is not registered, run btcli s register --netuid {config.netuid} --wallet.name {config.wallet.name} --wallet.hotkey {config.wallet.hotkey}')
     else: 
         my_uid = metagraph.hotkeys.index( wallet.hotkey.ss58_address )
-        bt.logging.success(f'Miner is registered on uid: {my_uid} on netuid: {config.netuid}')
+        bt.logging.success(f'Miner is registered on uid: {uid} on netuid: {config.netuid}')
+        
+    # Commit bucket information to chain.
+    commit_bucket = subtensor.get_commitment( netuid=config.netuid, uid=my_uid ) 
+    if commit_bucket != config.s3_bucket:
+        bt.logging.success(f"Advertising bucket: {config.s3_bucket}")
+        subtensor.commit(wallet, netuid = config.netuid, data = config.s3_bucket ) 
+    bt.logging.success(f"Using bucket: {config.s3_bucket}")
         
     # Check that AWS credentials have been set.
     if 'AWS_ACCESS_KEY_ID' not in os.environ or 'AWS_SECRET_ACCESS_KEY' not in os.environ:
         raise EnvironmentError("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set")
-    
+    bt.logging.success(f"Loaded AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from .env.")
+
     # Pull initial state.
     master = grad.utils.pull_master()
     if master == None:
         raise ValueError('No master found, wait for the owner to set a master model.')
     model = copy.deepcopy( master )
-    
+    bt.logging.success(f"Loaded master model.")
+
     # Training loop forever.   
     while True:
         
@@ -56,7 +73,7 @@ def main( config ):
         if grad.utils.download_master_hash() != grad.utils.hash_model( master ):
             master = grad.utils.pull_master()
             model = copy.deepcopy( master.cpu() )
-            bt.logging.success(f"Loaded new master.")
+            bt.logging.success(f"Loaded new master with hash: {grad.utils.hash_model( master )}")
 
         # Load dataset.
         batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
@@ -81,16 +98,16 @@ def main( config ):
         average_loss = total_loss / len(batches)
         bt.logging.success(f"Loss: {average_loss}")
             
-        # Save delta.
+        # Save delta to bucket.
         delta = grad.utils.calculate_delta( model, master )
-        grad.utils.push_model( config.uid, delta )
-        bt.logging.success(f"Pushed delta.")
+        grad.utils.push_model( config.s3_bucket, my_uid, delta )
+        bt.logging.success(f"Pushed delta to bucket: {config.s3_bucket} for uid: {my_uid} on netuid: {config.netuid}")
             
 # Entry point.
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a model and save deltas.")
     parser.add_argument("--netuid", default=81, type=int, help="Netuid.")
-    parser.add_argument("--uid", required=False, type=int, help="Unique identifier for the delta.")
+    parser.add_argument("--s3_bucket", default=None, type=str, help="S3 bucket.")
     parser.add_argument("--bs", default=1, type=int, help="Batch size.")
     parser.add_argument("--sl", default=512, type=int, help="Sequence length")
     parser.add_argument("--batches_per_step", default=1, type=int, help="Number of steps before applying a gradient step.")
@@ -99,4 +116,7 @@ if __name__ == "__main__":
     bt.logging.add_args( parser )
     bt.wallet.add_args(parser)
     config = bt.config( parser )
+    if config.s3_bucket == None:
+        bt.logging.error(f"You must set up your s3 bucket before running this script and pass the name to --s3_bucket [your_bucket_name]")
+        exit()
     main( config )
