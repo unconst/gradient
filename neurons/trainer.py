@@ -14,6 +14,7 @@
 # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
+import copy
 import random
 import argparse
 import traceback
@@ -33,11 +34,11 @@ def main(config):
             batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
             
             # Compute the base loss for comparison
-            base_score = grad.utils.compute_losses(model, batches, device=config.device)
-            bt.logging.debug(f"Base score computed for comparison: {base_score}")
+            base_loss = grad.utils.compute_losses(model, batches, device=config.device)
+            bt.logging.success(f"Base score computed for comparison: {base_loss}")
             
             # Load the deltas and compute the loss dif
-            for uid in grad.utils.list_models().keys():
+            for uid, info in grad.utils.list_models().items():
                 try:
                     # Load the delta
                     delta = grad.utils.pull_model( uid )
@@ -46,14 +47,16 @@ def main(config):
                     # Compute the loss after applying the delta
                     grad.utils.add_delta( model, delta )
                     loss = grad.utils.compute_losses(model, batches, device=config.device)
-                    grad.utils.remove_delta( model, delta )
-                    bt.logging.info(f"Loss {uid}: {loss}, {loss - base_score}")
+                    bt.logging.info(f"Loss {uid}: {loss}, {loss - base_loss}")
                     
                     # If the loss has improved significantly, save the model
-                    if loss < base_score * improvement_threshold:
-                        grad.utils.add_delta( model, delta )
+                    if loss < base_loss * improvement_threshold:
                         grad.utils.push_master( model )
-                        bt.logging.success("Model updated")
+                        bt.logging.success(f"Model updated with delta from {uid} given new loss: {loss} < base loss: {base_loss * improvement_threshold}")
+                        base_loss = loss
+                    else:
+                        # Remove the delta which increased the loss.
+                        grad.utils.remove_delta( model, delta )
 
                 except Exception as e:
                     continue

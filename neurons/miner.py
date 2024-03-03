@@ -15,6 +15,7 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+import os
 import copy
 import torch
 import random
@@ -26,9 +27,26 @@ from tqdm import tqdm
 # Main function.
 def main( config ):
     
+    # Build Bittensor objects.
+    wallet = bt.wallet(config=config)
+    subtensor = bt.subtensor(network = 'test')
+    metagraph = subtensor.metagraph( config.netuid )
+
+    # Check wallet registration.
+    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
+        raise ValueError(f'Miner is not registered, run btcli s register --netuid {config.netuid}')
+    else: 
+        my_uid = metagraph.hotkeys.index( wallet.hotkey.ss58_address )
+        bt.logging.success(f'Miner is registered on uid: {my_uid} on netuid: {config.netuid}')
+        
+    # Check that AWS credentials have been set.
+    if 'AWS_ACCESS_KEY_ID' not in os.environ or 'AWS_SECRET_ACCESS_KEY' not in os.environ:
+        raise EnvironmentError("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set")
+    
+    # Pull initial state.
     master = grad.utils.pull_master()
     if master == None:
-        raise ValueError('No master found.')
+        raise ValueError('No master found, wait for the owner to set a master model.')
     model = copy.deepcopy( master )
     
     # Training loop forever.   
@@ -71,6 +89,7 @@ def main( config ):
 # Entry point.
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a model and save deltas.")
+    parser.add_argument("--netuid", default=81, type=int, help="Netuid.")
     parser.add_argument("--uid", required=False, type=int, help="Unique identifier for the delta.")
     parser.add_argument("--bs", default=1, type=int, help="Batch size.")
     parser.add_argument("--sl", default=512, type=int, help="Sequence length")
@@ -78,5 +97,6 @@ if __name__ == "__main__":
     parser.add_argument("--pages_per_epoch", default=3, type=int, help="Training pages per epoch.")
     parser.add_argument("--device", type=str, default="cpu", help="Device to use for computations.")
     bt.logging.add_args( parser )
+    bt.wallet.add_args(parser)
     config = bt.config( parser )
     main( config )

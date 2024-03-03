@@ -14,6 +14,7 @@
 # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
+import copy
 import torch
 import random
 import argparse
@@ -26,6 +27,13 @@ def main(config):
     subtensor = bt.subtensor(network = 'test')
     metagraph = subtensor.metagraph( config.netuid )
     weights = torch.zeros(metagraph.n.item())   
+    
+    # Check wallet registration.
+    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
+        raise ValueError(f'Validator is not registered, run btcli s register --netuid {config.netuid}')
+    else: 
+        my_uid = metagraph.hotkeys.index( wallet.hotkey.ss58_address )
+        bt.logging.success(f'Validator is registered on uid: {my_uid} on netuid: {config.netuid}')
         
     while True:
         try:
@@ -51,8 +59,31 @@ def main(config):
                     bt.logging.trace(f'uid: { uid }, failed.')   
                     continue
                 
+            # Weights are the softmax of the loss deltas
             weights = config.alpha * torch.softmax(delta_losses, dim=0) + (1 - config.alpha) * weights
             bt.logging.success(f"weights: {weights}")
+            
+            # Set weights every 100 blocks.
+            current_block = subtensor.get_current_block()
+            if current_block % 100 == 0:
+                weights.nan_to_num(0.0)
+                subtensor.set_weights(
+                    netuid = config.netuid,
+                    wallet = wallet,
+                    uids = metagraph.uids,
+                    weights = weights,
+                    wait_for_inclusion = False,
+                )
+            
+            # Resync metagraph.
+            if current_block % 100 == 0:
+                prev_hotkeys = copy.deepcopy( metagraph.hotkeys )
+                metagraph = subtensor.metagraph( config.netuid )
+                # Clear old scores from newly registered miners.
+                for uid, (ha, hb) in enumerate(list(zip( prev_hotkeys, metagraph.hotkeys ))):
+                    if ha != hb: weights[uid] = 0.0
+                        
+            
         except Exception as e:
             bt.logging.error(f"An unexpected error occurred: {e}")
             break
@@ -68,10 +99,6 @@ if __name__ == "__main__":
     parser.add_argument("--netuid", default=81, type=int, help="Netuid.")
     bt.logging.add_args(parser)
     bt.wallet.add_args(parser)
-    
-    # Load the configuration
     config = bt.config(parser)
-    bt.logging(config = config)
-    
-    # Start the main evaluation loop
+    bt.logging(config = config)    
     main(config)

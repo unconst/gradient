@@ -221,20 +221,24 @@ def list_models() -> Dict[int, SimpleNamespace]:
         deltas_info: Dict[int, Dict[str, typing.Union[str, int]]] = {}
 
         for obj in response.get('Contents', []):
-            uid: int = int(obj['Key'].split('_')[1].split('.')[0])  # Extract uid from the object key format "delta_{uid}.pt"
-            if uid == MASTER: continue
-            local_hash = load_hash( uid )
-            remote_hash = download_hash( uid )
-            deltas_info[uid] = SimpleNamespace(
-                uid=uid,
-                module_name=f'module_{uid}.pt',
-                hash_name=obj['Key'],
-                remote_timestamp=obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
-                seconds=int(obj['LastModified'].timestamp()),
-                remote=remote_hash,
-                local=local_hash,
-                stale=remote_hash != local_hash,
-            )
+            try:
+                uid: int = int(obj['Key'].split('_')[1].split('.')[0])  # Extract uid from the object key format "delta_{uid}.pt"
+                if uid == MASTER: continue
+                local_hash = load_hash( uid )
+                remote_hash = download_hash( uid )
+                deltas_info[uid] = SimpleNamespace(
+                    uid=uid,
+                    module_name=f'module_{uid}.pt',
+                    hash_name=obj['Key'],
+                    remote_timestamp=obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
+                    seconds=int(obj['LastModified'].timestamp()),
+                    remote=remote_hash,
+                    local=local_hash,
+                    stale=remote_hash != local_hash,
+                )
+            except Exception as e:
+                bt.logging.trace(f'failed to load object with error: {e}')
+                continue
         bt.logging.debug("Successfully listed all deltas from S3.")
         return deltas_info
     except (BotoCoreError, ClientError) as e:
@@ -283,10 +287,12 @@ def remove_delta(model: torch.nn.Module, delta: torch.nn.Module ) -> None:
         This function assumes the delta was previously added to the model using the add_delta function.
     """
     try:
+        model_state_dict = model.state_dict()
         delta_state_dict = delta.state_dict()
-        for name, param in model.named_parameters():
-            if name in delta_state_dict:
-                param.data -= delta_state_dict[name].data.to(model.device)
+        for name, param in delta_state_dict.items():
+            if name in model_state_dict:
+                model_state_dict[name] -= param.data.to(model.device)
+        model.load_state_dict(model_state_dict)
         bt.logging.debug("Delta successfully removed from the model.")
     except Exception as e:
         bt.logging.error(f"Failed to remove delta from the model: {e}")
@@ -312,7 +318,7 @@ def calculate_delta(model_a: torch.nn.Module, model_b: torch.nn.Module) -> torch
     for name, param in state_dict_a.items():
         if name in state_dict_b:
             # Subtract the parameters of model_b from model_a and store it in the delta dictionary
-            delta_param = param - state_dict_b[name]
+            delta_param = param.cpu() - state_dict_b[name].cpu()
             delta_dict[name] = delta_param    
     import copy
     delta = copy.deepcopy( model_a )
