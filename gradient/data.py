@@ -27,6 +27,7 @@ from transformers import GPT2Tokenizer
 
 def get_random_batches( n: int, batch_size: int, sequence_length: int ) -> typing.List[torch.FloatTensor]:
     return list( SubsetFalconLoader( batch_size, sequence_length, [ random.randint(0, SubsetFalconLoader.max_pages) for _ in range( n ) ] ) )
+
 class SubsetFalconLoader(IterableDataset):
     max_pages: int = 968000015
 
