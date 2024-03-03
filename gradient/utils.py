@@ -31,7 +31,7 @@ from transformers import GPT2Tokenizer, GPT2LMHeadModel
 # Define the name of the S3 bucket where the model and its hash will be stored.
 MASTER = 8008135
 model_name: str = 'gpt2'
-storage_location: str = './cache'
+storage_location: str = os.path.expanduser('~/.cache')
 bucket_name: str = 'turingbucket123'
 
 def hash_model(module: torch.nn.Module) -> str:

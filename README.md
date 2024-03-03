@@ -42,8 +42,8 @@ If you don't already have an AWS account, go to the AWS homepage and sign up.
 ### Step 4: Configure Your Environment
 Open a terminal and run the following commands to add your AWS credentials to your `~/.bash_profile`. Replace `YOUR_ACCESS_KEY_ID` and `YOUR_SECRET_ACCESS_KEY` with the credentials obtained in the previous step.
 ```bash
-echo "export AWS_ACCESS_KEY_ID='AKIA3TN4TF2QQ4KC4CBA'" >> ~/.bash_profile
-echo "export AWS_SECRET_ACCESS_KEY='a/VLFo0RIlS6WSn2BoLffsRW1frmwm5AyoFcQj2e'" >> ~/.bash_profile
+echo "export AWS_ACCESS_KEY_ID='<your key>'" >> ~/.bash_profile
+echo "export AWS_SECRET_ACCESS_KEY='<your access key>'" >> ~/.bash_profile
 ```
 ### How to Run a Miner
 
