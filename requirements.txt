@@ -2,3 +2,4 @@ bittensor==6.8.0
 torch==1.13.1
 boto3==1.34.21
 transformers==4.34.1
+python-dotenv

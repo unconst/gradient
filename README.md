@@ -39,12 +39,18 @@ If you don't already have an AWS account, go to the AWS homepage and sign up.
 4. Choose **Attach existing policies directly** and select the **AmazonS3FullAccess** policy.
 5. Follow the rest of the on-screen instructions to create the user. After the user is created, you'll be provided with an **Access key ID** and a **Secret access key**. Make a note of these credentials.
 
-### Step 4: Configure Your Environment
-Open a terminal and run the following commands to add your AWS credentials to your `~/.bash_profile`. Replace `YOUR_ACCESS_KEY_ID` and `YOUR_SECRET_ACCESS_KEY` with the credentials obtained in the previous step.
-```bash
-echo "export AWS_ACCESS_KEY_ID='<your key>'" >> ~/.bash_profile
-echo "export AWS_SECRET_ACCESS_KEY='<your access key>'" >> ~/.bash_profile
-```
+### Step 4: Configure Your Environment Using a `.env` File
+To securely manage your AWS credentials, you will create a `.env` file in your project's root directory and add your credentials to it. Follow these steps:
+
+1. Open a terminal and navigate to the root directory of your project.
+
+2. Run the following commands to create a `.env` file and add your AWS credentials to it. Replace `YOUR_ACCESS_KEY_ID` and `YOUR_SECRET_ACCESS_KEY` with the credentials obtained in the previous step:
+   ```bash
+   touch .env
+   echo "AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY_ID" >> .env
+   echo "AWS_SECRET_ACCESS_KEY=YOUR_SECRET_ACCESS_KEY" >> .env
+   ```
+
 ### How to Run a Miner
 
 To run a miner, you will need to execute the `miner.py` script, which is responsible for the mining process. This script handles the training of the model on your local machine, calculates the delta (the difference between the newly trained model and the master model), and then pushes this delta back to the network.

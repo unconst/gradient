@@ -23,16 +23,20 @@ import typing
 import hashlib
 import tempfile
 import bittensor as bt
+from dotenv import dotenv_values
 from types import SimpleNamespace
 from typing import Optional, Dict, Tuple, List
 from botocore.exceptions import BotoCoreError, ClientError
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
 # Define the name of the S3 bucket where the model and its hash will be stored.
+env_config = dotenv_values(".env")
 MASTER = 8008135
 model_name: str = 'gpt2'
 storage_location: str = os.path.expanduser('~/.cache')
 bucket_name: str = 'turingbucket123'
+if 'AWS_ACCESS_KEY_ID' not in env_config or 'AWS_SECRET_ACCESS_KEY' not in env_config:
+    raise Exception("Please provide AWS credentials in the .env file; touch .env and add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.")
 
 def hash_model(module: torch.nn.Module) -> str:
     """
@@ -75,8 +79,8 @@ def client():
         s3client: boto3.client = boto3.client(
             's3',
             region_name='us-east-1',
-            aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY')
+            aws_access_key_id=env_config['AWS_ACCESS_KEY_ID'],
+            aws_secret_access_key=env_config['AWS_SECRET_ACCESS_KEY']
         )
         return s3client
     except Exception as e:
