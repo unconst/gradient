@@ -17,6 +17,7 @@
 import os
 import io
 import time
+import copy
 import boto3
 import torch
 import typing
@@ -250,29 +251,33 @@ def list_models( bucket: str ) -> Dict[int, SimpleNamespace]:
         bt.logging.error(f"Failed to list deltas from S3: {e}")
         raise Exception(f"Failed to list deltas from S3: {e}")
 
-def add_delta(model: torch.nn.Module, delta: torch.nn.Module) -> None:
+def add_delta(model: torch.nn.Module, delta: torch.nn.Module) -> torch.nn.Module:
     """
-    Applies a delta to the model parameters by adding it.
+    Applies a delta to the model parameters by adding it and returns a new model with the updated parameters.
 
     This function iterates over the model's parameters and adds the corresponding delta values,
-    effectively updating the model's parameters based on the delta. It ensures the model's state_dict
-    is directly updated to reflect these changes.
+    effectively creating a new model with updated parameters based on the delta.
 
     Args:
         model (torch.nn.Module): The model to which the delta will be applied.
         delta (torch.nn.Module): The delta to apply to the model's parameters.
 
+    Returns:
+        torch.nn.Module: A new model with the delta applied to its parameters.
+
     Note:
         The delta should be scaled appropriately before being passed to this function.
     """
     try:
-        model_state_dict = model.state_dict()
+        new_model = copy.deepcopy(model)
+        model_state_dict = new_model.state_dict()
         delta_state_dict = delta.state_dict()
         for name, param in delta_state_dict.items():
             if name in model_state_dict:
-                model_state_dict[name] += param.data.to(model.device)
-        model.load_state_dict(model_state_dict)
-        bt.logging.debug("Delta successfully added to the model.")
+                model_state_dict[name] += param.data.to(new_model.device)
+        new_model.load_state_dict(model_state_dict)
+        bt.logging.debug("Delta successfully added to the new model.")
+        return new_model
     except Exception as e:
         bt.logging.error(f"Failed to add delta to the model: {e}")
         raise Exception(f"Failed to add delta to the model: {e}")

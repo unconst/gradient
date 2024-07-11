@@ -42,20 +42,21 @@ def main(config):
         my_uid = metagraph.hotkeys.index( wallet.hotkey.ss58_address )
         bt.logging.success(f'Validator is registered on uid: {my_uid} on netuid: {config.netuid}')
         
+    master = None
     while True:
         try:
             # Load the model and tokenizer
-            master = grad.utils.pull_master()
-            master.to(config.device)
-            master.eval()
+            if master is None or grad.utils.download_master_hash() != grad.utils.hash_model( master ):
+                master = grad.utils.pull_master()
 
             # Load a random set of batches
+            master.eval()
+            master.to(config.device)
             batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
-
-            # Compute the base score for comparison
-            master_loss = grad.utils.compute_losses(master, batches, device=config.device)
+            base_loss = grad.utils.compute_losses(master, batches, device=config.device)
             delta_losses = torch.zeros(metagraph.n.item())
-            
+            master.to( "cpu" )
+
             for uid in metagraph.uids:
                 try:       
                     # Get bucket name from subtensor commits.             
@@ -71,17 +72,12 @@ def main(config):
                         continue
                     
                     # Apply the delta to the model
-                    grad.utils.add_delta(master, delta)
-                    
-                    # Compute the delta loss with the delta applied.
-                    delta_loss = master_loss - grad.utils.compute_losses(master, batches, device=config.device)
-                    
-                    # Save the loss.
-                    delta_losses[uid] = delta_loss
-                    
-                    # Remove the delta from our local model.
-                    grad.utils.remove_delta(master, delta)
-                    
+                    head = grad.utils.add_delta(master, delta)
+                    head.eval()
+                    head.to(config.device)
+                    head_loss = grad.utils.compute_losses(head, batches, device=config.device)
+                    delta_losses[uid] = base_loss - head_loss
+                                        
                 except Exception as e:
                     bt.logging.trace(f'uid: { uid }, failed with error: {e}')   
                     continue
