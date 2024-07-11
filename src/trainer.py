@@ -19,8 +19,11 @@ import random
 import argparse
 import traceback
 import bittensor as bt
-import gradient as grad
 from transformers import GPT2LMHeadModel
+
+# Import helpers.
+from utils import push_master, add_delta, list_models, pull_model
+from dataset import get_random_batches,compute_losses
 
 def main(config):
     # Threshold for improvement to save the model
@@ -30,28 +33,28 @@ def main(config):
         try:
             
             # push the master
-            grad.utils.push_master( master )
+            push_master( master )
 
             # Load a random set of batches
-            batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
+            batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
             
             # Compute the base loss for comparison
             master.to( config.device )
-            base_loss = grad.utils.compute_losses(master, batches, device=config.device)
+            base_loss = compute_losses(master, batches, device=config.device)
             master.to( "cpu" )
             bt.logging.success(f"Base score computed for comparison: {base_loss}")
             
             # Load the deltas and compute the loss dif
-            for uid, info in grad.utils.list_models().items():
+            for uid, info in list_models().items():
                 try:
                     # Load the delta
-                    delta = grad.utils.pull_model( uid )
+                    delta = pull_model( uid )
                     if delta is None: continue
                     
                     # Compute the loss after applying the delta
-                    head = grad.utils.add_delta( master, delta )
+                    head = add_delta( master, delta )
                     head.to( config.device )
-                    loss = grad.utils.compute_losses(head, batches, device=config.device)
+                    loss = compute_losses(head, batches, device=config.device)
                     bt.logging.info(f"Loss {uid}: {loss}, {loss - base_loss}")
                     head.cpu()
 

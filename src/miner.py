@@ -21,8 +21,10 @@ import torch
 import random
 import argparse
 import bittensor as bt
-import gradient as grad
 from tqdm import tqdm
+
+from utils import pull_master, hash_model, download_master_hash, calculate_delta, push_model
+from dataset import get_random_batches
 
 # Main function.
 def main( config ):
@@ -60,7 +62,7 @@ def main( config ):
     bt.logging.success(f"Loaded AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from .env.")
 
     # Pull initial state.
-    master = grad.utils.pull_master()
+    master = pull_master()
     if master == None:
         raise ValueError('No master found, wait for the owner to set a master model.')
     model = copy.deepcopy( master )
@@ -70,13 +72,14 @@ def main( config ):
     while True:
         
         # If the master model has changed, pull the latest.
-        if grad.utils.download_master_hash() != grad.utils.hash_model( master ):
-            master = grad.utils.pull_master()
+        master_hash = hash_model( master )
+        if download_master_hash() != master_hash:
+            master = pull_master()
             model = copy.deepcopy( master.cpu() )
-            bt.logging.success(f"Loaded new master with hash: {grad.utils.hash_model( master )}")
+            bt.logging.success(f"Loaded new master with hash: {master_hash}")
 
         # Load dataset.
-        batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
+        batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
         
         # Train model for epoch.
         model.train()
@@ -99,8 +102,8 @@ def main( config ):
         bt.logging.success(f"Loss: {average_loss}")
             
         # Save delta to bucket.
-        delta = grad.utils.calculate_delta( model, master )
-        grad.utils.push_model( config.s3_bucket, my_uid, delta )
+        delta = calculate_delta( model, master )
+        push_model( config.s3_bucket, my_uid, delta )
         bt.logging.success(f"Pushed delta to bucket: {config.s3_bucket} for uid: {my_uid} on netuid: {config.netuid}")
             
 # Entry point.

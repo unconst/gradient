@@ -1,7 +1,7 @@
 
 # Gradient: Incentivized Distributed Training
 
-![System Design](/docs/systemdesign.jpg)
+![System Design](/assets/systemdesign.jpg)
 
 # Introduction
 The subnet uses Bittensor's incentive system to reward computers for producing gradients which maximially reduce the loss on the model architecture hosted by the subnet owner. The use of S3 buckets factilitates high bandwidth communication between peers. 

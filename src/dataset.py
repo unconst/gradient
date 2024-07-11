@@ -25,6 +25,64 @@ import bittensor as bt
 from torch.utils.data import IterableDataset
 from transformers import GPT2Tokenizer
 
+def compute_losses(model: torch.nn.Module, batches: typing.List[torch.Tensor], device: str = 'cpu') -> float:
+    """
+    Computes and returns the average loss of a model evaluated over a given set of batches.
+
+    This function iterates through each batch, feeds it to the model, and accumulates the loss to compute
+    the average loss across all batches. This is useful for evaluating the model's performance on a dataset.
+
+    Args:
+        model (torch.nn.Module): The model to be evaluated.
+        batches (List[torch.Tensor]): A list of batches to evaluate the model on. Each batch is a torch.Tensor.
+        device (str, optional): The device (e.g., 'cpu' or 'cuda') on which to perform the computations. Defaults to 'cpu'.
+
+    Returns:
+        float: The average loss computed over all the batches.
+
+    Note:
+        This function does not compute gradients and is typically used for model evaluation.
+
+    Raises:
+        ValueError: If `batches` is empty, raising a ValueError to indicate that no batches were provided for evaluation.
+    """
+    # Ensure there are batches to compute the loss on
+    if not batches:
+        bt.logging.error("No batches provided for loss computation.")
+        raise ValueError("No batches provided for loss computation.")
+
+    # Initialize total_loss to accumulate losses over batches
+    total_loss: float = 0.0
+
+    # Calculate the number of batches for averaging the loss later
+    num_batches: int = len(batches)
+
+    # Disable gradient computations for efficiency and to prevent model updates
+    with torch.no_grad():
+        for batch in batches:
+            try:
+                # Move the batch to the specified device (e.g., CPU or GPU)
+                inputs: torch.Tensor = batch.to(device)
+                # Forward pass: Compute the model's output and loss for the given inputs
+                outputs = model(inputs, labels=inputs)
+                # Accumulate the loss
+                total_loss += outputs.loss.item()
+            except Exception as e:
+                bt.logging.error(f"Error during loss computation for a batch: {e}")
+                raise Exception(f"Error during loss computation for a batch: {e}")
+
+    # Compute the average loss across all batches
+    try:
+        average_loss: float = total_loss / num_batches
+    except ZeroDivisionError as e:
+        bt.logging.error("Division by zero encountered while computing average loss. This should not happen.")
+        raise ZeroDivisionError("Division by zero encountered while computing average loss.")
+
+    # Log the computed average loss
+    bt.logging.debug(f"Average loss computed successfully: {average_loss}")
+
+    return average_loss
+
 def get_random_batches( n: int, batch_size: int, sequence_length: int ) -> typing.List[torch.FloatTensor]:
     return list( SubsetFalconLoader( batch_size, sequence_length, [ random.randint(0, SubsetFalconLoader.max_pages) for _ in range( n ) ] ) )
 

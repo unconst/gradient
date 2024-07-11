@@ -19,7 +19,9 @@ import torch
 import random
 import argparse
 import bittensor as bt
-import gradient as grad
+
+from dataset import get_random_batches, compute_losses
+from utils import download_master_hash, hash_model, pull_master, download_model, add_delta
 
 def main(config):
 
@@ -46,14 +48,14 @@ def main(config):
     while True:
         try:
             # Load the model and tokenizer
-            if master is None or grad.utils.download_master_hash() != grad.utils.hash_model( master ):
-                master = grad.utils.pull_master()
+            if master is None or download_master_hash() != hash_model( master ):
+                master = pull_master()
 
             # Load a random set of batches
             master.eval()
             master.to(config.device)
-            batches = grad.data.get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
-            base_loss = grad.utils.compute_losses(master, batches, device=config.device)
+            batches = get_random_batches( n = config.pages_per_epoch, batch_size = config.bs, sequence_length = config.sl )
+            base_loss = compute_losses(master, batches, device=config.device)
             delta_losses = torch.zeros(metagraph.n.item())
             master.to( "cpu" )
 
@@ -66,16 +68,16 @@ def main(config):
                         continue
                     
                     # Get the delta from the bucket.
-                    delta = grad.utils.download_model( bucket_name, uid )
+                    delta = download_model( bucket_name, uid )
                     if delta is None: 
                         bt.logging.trace(f'uid: { uid }, has no delta.')
                         continue
                     
                     # Apply the delta to the model
-                    head = grad.utils.add_delta(master, delta)
+                    head = add_delta(master, delta)
                     head.eval()
                     head.to(config.device)
-                    head_loss = grad.utils.compute_losses(head, batches, device=config.device)
+                    head_loss = compute_losses(head, batches, device=config.device)
                     delta_losses[uid] = base_loss - head_loss
                                         
                 except Exception as e:
